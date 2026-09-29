@@ -1,0 +1,18 @@
+[package]
+name = "epub-reader"
+version = "0.1.0"
+description = "Lector EPUB con paso de página realista"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true
