@@ -26,12 +26,18 @@ uniform float uSpineX;     // screen x of the spine
 // Darkening of the page right next to the edge of the flipped-over part of the sheet.
 // p is sheet-local and on the flat side of the axis (d <= 0): the flipped paper above p
 // comes from s; if s is outside the sheet, p is uncovered and near the edge -> shadow.
+// The shadow only exists where the paper really lies flipped over past the roll: on a
+// short drag the free edge still sits on top of the cylinder, and darkening the page next
+// to the axis there leaves a bright seam against the lit side of the roll.
 float flippedEdgeShadow(vec2 p, float d) {
   vec2 s = p + uDir * (PI * uRadius - 2.0 * d);
   vec2 q = max(max(-s, s - uSheetSize), 0.0);
   float dist = length(q);
   if (dist <= 0.0) return 1.0;
-  return 1.0 - 0.32 * uShadow * exp(-dist / (5.0 + uRadius * 0.35));
+  vec2 wall = mix(p, uSheetSize - p, step(0.0, uDir)) / (abs(uDir) + 1e-5);
+  float beyondRoll = d + min(wall.x, wall.y) - PI * uRadius;
+  float fade = smoothstep(0.0, uRadius * 0.6 + 6.0, beyondRoll);
+  return 1.0 - 0.32 * uShadow * fade * exp(-dist / (5.0 + uRadius * 0.35));
 }
 
 float gutterShade(float dist) {
@@ -144,18 +150,21 @@ void main() {
     c = texture(uBack, vec2(1.0 - vUV.x, vUV.y)).rgb;
   }
 
-  // Diffuse term normalised so flat paper keeps its exact color.
+  // Matte paper: diffuse term normalised so flat paper keeps its exact color. Nothing
+  // gets brighter than the paper itself; anything above it clips towards pure white and
+  // reads as a white stripe on the roll instead of as paper.
   float diff = dot(Nv, L) / L.z;
-  float light = clamp(0.5 + 0.5 * diff, 0.0, 1.08);
-  bool onCurl = vD > 0.0 && vD < PI * max(uRadius, 0.75);
-  if (onCurl) {
-    vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
-    float flatSpec = pow(H.z, 60.0);
-    light += 0.22 * max(pow(max(dot(Nv, H), 0.0), 60.0) - flatSpec, 0.0);
-    // Ambient occlusion inside the roll.
-    light *= 1.0 - 0.18 * smoothstep(0.35, 1.0, vD / (PI * max(uRadius, 0.75)));
+  float light = clamp(0.5 + 0.5 * diff, 0.0, 1.0);
+  float R = max(uRadius, 0.75);
+  if (!front) {
+    // The back of the sheet: slightly grey, darkest where it turns over the roll and
+    // brightening smoothly towards the free edge (no step where the roll meets the flat part).
+    float fromCrest = max(vD - 0.5 * PI * R, 0.0);
+    light *= 0.93 * (1.0 - 0.17 * exp(-fromCrest / (R * 1.1 + 16.0)));
+  } else if (vD > 0.0) {
+    // The rising side of the roll turns away from the viewer: soft occlusion.
+    light *= 1.0 - 0.12 * smoothstep(0.15, 0.5, vD / (PI * R));
   }
-  if (!front) light *= 0.94;
 
   float shade = gutterShade(vLocal.x);
   if (vD <= 0.0) shade *= flippedEdgeShadow(vLocal, vD);

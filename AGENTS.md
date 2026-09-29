@@ -55,6 +55,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 - **Neighbour sections load asynchronously.** Cross-chapter turns must `await ensureSection()` first (see `Reader.turn`), or the first key press after opening is lost.
 - **Textures in use must not be evicted.** Long animations (the riffle) `pin()` their pages and call `unpinAll()` when done.
 - **The sheet is rendered orthographically.** The shadows the lifted paper casts are computed in flat sheet space (`flippedEdgeShadow`, curl shadow). Adding perspective to the sheet makes paper and shadow drift apart and leaves a bright, unshadowed sliver along the flipped edge.
+- **The paper is matte.** Sheet lighting never exceeds the paper color. Anything brighter clips to white and shows up as a white stripe on the roll. The back of the sheet is shaded with one continuous gradient (darkest at the crest of the roll), and `flippedEdgeShadow` fades out when the free edge still rests on the roll. A step in brightness at the axis or at the end of the roll reads as a seam.
 - **Positions are anchors, not page numbers.** Save and restore with `Section.anchorAt()` / `pageOfAnchor()` so font, size and rotation changes keep the reader on the same passage.
 - **ARM64 performance:** WebGL runs without MSAA at dpr ≥ 1.75, with `desynchronized: true` and `high-performance`. There are no per-frame allocations in the render loop, and the mesh is never rebuilt.
 

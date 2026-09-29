@@ -52,7 +52,7 @@ export function curlGeometry(corner: Vec2, finger: Vec2, W: number, H: number): 
   const progress = Math.min(1, Math.max(0, L / (2 * W)));
 
   // Radius grows as the sheet lifts, then shrinks so the page lands flat.
-  const rMax = Math.min(W, H) * 0.11 + 14;
+  const rMax = Math.min(W, H) * 0.075 + 10;
   const lift = Math.min(1, L / (W * 0.28));
   const land = 1 - smoothstep(0.55, 1, progress);
   const radius = Math.max(0.75, rMax * lift * (0.12 + 0.88 * land));

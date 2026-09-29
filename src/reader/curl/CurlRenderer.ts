@@ -44,7 +44,7 @@ export class CurlRenderer {
   private cssH = 1;
   private clear: [number, number, number] = [0.85, 0.83, 0.78];
   paper: [number, number, number] = [1, 1, 1];
-  showThrough = 0.16;
+  showThrough = 0.3;
 
   constructor(readonly canvas: HTMLCanvasElement) {
     const dpr = window.devicePixelRatio || 1;
