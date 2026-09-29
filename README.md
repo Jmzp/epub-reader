@@ -22,7 +22,9 @@ A desktop EPUB reader with **realistic page turning**: grab the page with a fing
 - **Status bar** like a phone reader: clock, battery, chapter with page, and percentage of the book.
 - **Picks up where you left off.** The reading position is stored as a text anchor, so it survives font, window-size and rotation changes.
 - **Library** with covers and progress. Open books from a file dialog or by dropping them on the window; with the installer, also by double-clicking an `.epub`.
-- **Reading settings:** font size, typeface, line height, margins, paper/sepia/night themes and page mode.
+- **Typography:** font size, built-in faces or your own imported fonts (TTF, OTF, WOFF), alignment (original, justified, left), hyphenation on/off, paragraph style (original, indented, spaced), line height and margins. Imported fonts show up on the turning page too.
+- **Dictionary.** Select a word and tap *Definir* to see its definitions from Wiktionary, matched to the book's language, with a link to the full entry.
+- **Reading settings:** paper/sepia/night themes, two-page or single-page mode, and an optional status bar.
 - **Full input support:** touch, pen, mouse, wheel and keyboard (`←` `→` `PgUp` `PgDn` `Space` `F11`, `Ctrl+F` to search).
 - **EPUB 2 and EPUB 3:** OPF, spine, NCX or nav document, cover, and the book's own CSS and images.
 
@@ -34,7 +36,7 @@ The installer and the portable build come from the ARM64 build (see below):
 
 | File | Use |
 | --- | --- |
-| `Lector EPUB_<version>_arm64-setup.exe` | Per-user installer, no admin needed. Associates `.epub` files and installs WebView2 if missing. |
+| `Lector EPUB_1.0.0_arm64-setup.exe` | Per-user installer, no admin needed. Associates `.epub` files and installs WebView2 if missing. |
 | `epub-reader.exe` | Portable. Requires WebView2, which ships with Windows 11. |
 
 > The app is not code-signed, so SmartScreen will warn about it. Click **More info → Run anyway**.
@@ -98,9 +100,12 @@ EPUB (zip) ──► parser (fflate + DOMParser) ──► one iframe per chapte
 | `src/main.ts`, `src/ui/` | Library, toolbars, table of contents and settings |
 | `src/storage.ts` | Library (IndexedDB), reading position and settings (localStorage) |
 | `src/annotations.ts` | Highlights, notes and bookmarks: types, storage and Markdown export |
+| `src/dictionary.ts` | Wiktionary lookups for the *Definir* action |
 | `src-tauri/` | Native shell: window, `.epub` file association and NSIS bundle |
 
 ## Known limitations
+
+- The dictionary needs an internet connection, and its definitions are in English (Wiktionary groups them by the language of the word).
 
 - Selection works by long press only (the gesture layer covers the page, so there is no native text selection).
 - Web fonts embedded in an EPUB may render with a fallback font during a turn.

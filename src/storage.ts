@@ -22,22 +22,35 @@ export interface SavedLocation {
   progress: number;
 }
 
+/** A font file imported by the reader. */
+export interface UserFont {
+  id: string;
+  name: string;
+  type: string;
+  data: ArrayBuffer;
+}
+
 const DB_NAME = 'epub-reader';
 const STORE = 'books';
+const FONTS = 'fonts';
 
 function db(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'id' });
+    const req = indexedDB.open(DB_NAME, 2);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath: 'id' });
+      if (!d.objectStoreNames.contains(FONTS)) d.createObjectStore(FONTS, { keyPath: 'id' });
+    };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
 }
 
-async function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+async function tx<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>, store = STORE): Promise<T> {
   const d = await db();
   return new Promise((resolve, reject) => {
-    const req = run(d.transaction(STORE, mode).objectStore(STORE));
+    const req = run(d.transaction(store, mode).objectStore(store));
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
@@ -58,6 +71,12 @@ export const library = {
   get: (id: string) => tx<LibraryBook | undefined>('readonly', (s) => s.get(id)),
   put: (book: LibraryBook) => tx('readwrite', (s) => s.put(book)),
   remove: (id: string) => tx('readwrite', (s) => s.delete(id)),
+};
+
+export const fonts = {
+  list: () => tx<UserFont[]>('readonly', (s) => s.getAll(), FONTS),
+  put: (f: UserFont) => tx('readwrite', (s) => s.put(f), FONTS),
+  remove: (id: string) => tx('readwrite', (s) => s.delete(id), FONTS),
 };
 
 function readJson<T>(key: string): T | null {

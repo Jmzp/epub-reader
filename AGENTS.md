@@ -41,6 +41,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 | `src/reader/Reader.ts` | Orchestrator: sections, current view, `TurnSource`, prefetch, TOC riffle, persistence callbacks. |
 | `src/main.ts`, `src/ui/styles.css` | Library, toolbars, TOC, settings. |
 | `src/storage.ts` | IndexedDB library + localStorage settings/positions. |
+| `src/dictionary.ts` | Wiktionary REST lookups (CORS-enabled, no key); links open through `tauri-plugin-opener`. |
 | `src/annotations.ts` | Highlights, notes, bookmarks (localStorage `notes:<bookId>`), Markdown export. |
 | `src-tauri/` | Minimal Rust shell: window, `.epub` file-association commands, NSIS bundle. |
 
@@ -60,6 +61,8 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 - **Never mutate a section's `<body>`.** Anchors are node paths from `<body>`, so highlights, bookmarks and positions break if nodes are wrapped or inserted. Marks are painted as boxes in a layer that is a sibling *before* `<body>` (under the text), and `Section.rasterSvg` injects the same boxes, so highlights look identical at rest and while turning. After changing marks, drop that section's textures (`PageTextures.dropSection`), as `Reader.applyMarks` does.
 - **Search parses sections like the live iframe.** `Reader.search` runs `buildSectionXhtml` + an XHTML `DOMParser`, the same pipeline the iframe loads, so node paths from search hits resolve in the live document.
 - **Long press selects, movement turns.** `PageTurner` starts a selection after 450 ms without crossing the drag slop; any movement before that is a page turn.
+- **Imported fonts are data: URLs.** The reader CSS is shared by the live iframe and the SVG `foreignObject` rasterizer, which cannot fetch blob: or file URLs. Fonts live in IndexedDB (`fonts` store) and are registered with `registerUserFont()` before any reader opens.
+- **Wait for fonts before trusting pagination.** `Section.fontsReady()` re-measures after `document.fonts.ready`; `Reader.relayout` then realigns to the saved anchor and clears textures if the page count changed.
 - **Positions are anchors, not page numbers.** Save and restore with `Section.anchorAt()` / `pageOfAnchor()` so font, size and rotation changes keep the reader on the same passage.
 - **ARM64 performance:** WebGL runs without MSAA at dpr ≥ 1.75, with `desynchronized: true` and `high-performance`. There are no per-frame allocations in the render loop, and the mesh is never rebuilt.
 

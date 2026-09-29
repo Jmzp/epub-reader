@@ -7,11 +7,12 @@ import {
   type Highlight,
   type HighlightColor,
 } from './annotations';
+import { define, lookupTerm } from './dictionary';
 import { parseEpub, type Book, type TocEntry } from './epub/book';
-import { openedFile, toggleFullscreen } from './platform';
+import { openedFile, openExternal, toggleFullscreen } from './platform';
 import { Reader, type ReaderPosition, type SearchHit, type SelectionInfo } from './reader/Reader';
-import type { ReaderSettings } from './reader/layout';
-import { bookBytes, coverBlob, library, prefs, type LibraryBook, type SavedLocation } from './storage';
+import { registerUserFont, unregisterUserFont, type ReaderSettings } from './reader/layout';
+import { bookBytes, coverBlob, fonts as fontStore, library, prefs, type LibraryBook, type SavedLocation, type UserFont } from './storage';
 
 const app = document.getElementById('app')!;
 let settings = prefs.settings();
@@ -196,10 +197,11 @@ function openReader(book: Book, entry: LibraryBook) {
   const searchPanel = el('div', { className: 'panel side search', hidden: true });
   const notesPanel = el('div', { className: 'panel side notes', hidden: true });
   const selMenu = el('div', { className: 'selmenu', hidden: true });
+  const dict = el('div', { className: 'dict', hidden: true });
   const noteEditor = el('div', { className: 'panel note-editor', hidden: true });
   const toast = el('div', { className: 'toast', hidden: true });
   const status = el('div', { className: 'status' });
-  shell.append(status, top, bottom, toc, settingsPanel, searchPanel, notesPanel, selMenu, noteEditor, toast);
+  shell.append(status, top, bottom, toc, settingsPanel, searchPanel, notesPanel, selMenu, dict, noteEditor, toast);
 
   const flatToc: { entry: TocEntry; depth: number }[] = [];
   const walk = (list: TocEntry[], depth: number) =>
@@ -298,17 +300,58 @@ function openReader(book: Book, entry: LibraryBook) {
 
   const hideSelMenu = () => {
     selMenu.hidden = true;
+    dict.hidden = true;
+    lookupRun++;
   };
 
-  /** Floating menu above (or below) a rect in view coordinates. */
-  const placeMenu = (rect: DOMRect) => {
-    selMenu.hidden = false;
-    const w = selMenu.offsetWidth;
-    const h = selMenu.offsetHeight;
+  /** Floating card with the definition; the selection stays so a tap dismisses both. */
+  let lookupRun = 0;
+  const showDefinition = async (sel: SelectionInfo) => {
+    const run = ++lookupRun;
+    selMenu.hidden = true;
+    const term = lookupTerm(sel.text);
+    const body = el('div', { className: 'dict-body' }, el('p', { className: 'meta', textContent: 'Buscando…' }));
+    const more = el('button', { className: 'menu-btn', textContent: 'Wiktionary ↗' });
+    more.onclick = () => void openExternal(`https://en.wiktionary.org/wiki/${encodeURIComponent(term)}`);
+    dict.replaceChildren(el('h3', { textContent: term }), body, el('div', { className: 'dict-foot' }, more));
+    dict.hidden = false;
+    placeCard(dict, sel.rect);
+    try {
+      const found = await define(term, book.metadata.language);
+      if (run !== lookupRun) return;
+      if (!found) {
+        body.replaceChildren(el('p', { className: 'meta', textContent: 'No hay definición para esta palabra.' }));
+      } else {
+        body.replaceChildren(
+          ...found.entries.map((e) =>
+            el(
+              'section',
+              {},
+              el('div', { className: 'pos', textContent: e.partOfSpeech }),
+              el('ol', {}, ...e.senses.map((sense) => el('li', {}, sense.text, ...sense.examples.map((x) => el('div', { className: 'example', textContent: x }))))),
+            ),
+          ),
+        );
+      }
+    } catch {
+      if (run === lookupRun) body.replaceChildren(el('p', { className: 'meta', textContent: 'Sin conexión: el diccionario necesita internet.' }));
+    }
+    if (run === lookupRun) placeCard(dict, sel.rect);
+  };
+
+  /** Places a floating element above (or below) a rect in view coordinates. */
+  const placeCard = (card: HTMLElement, rect: DOMRect) => {
+    const w = card.offsetWidth;
+    const h = card.offsetHeight;
     const x = Math.max(8, Math.min(shell.clientWidth - w - 8, rect.left + rect.width / 2 - w / 2));
     const above = rect.top - h - 12;
-    const y = above > 8 ? above : Math.min(shell.clientHeight - h - 8, rect.bottom + 12);
-    selMenu.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+    const below = rect.bottom + 12;
+    const y = above > 8 ? above : below + h < shell.clientHeight - 8 ? below : Math.max(8, shell.clientHeight - h - 8);
+    card.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
+  };
+  const placeMenu = (rect: DOMRect) => {
+    selMenu.hidden = false;
+    placeCard(selMenu, rect);
   };
 
   const swatches = (current: HighlightColor | null, pick: (c: HighlightColor) => void) =>
@@ -346,6 +389,7 @@ function openReader(book: Book, entry: LibraryBook) {
         void copy(sel.text);
         reader?.clearSelection();
       }),
+      ...(sel.text.trim().split(/\s+/).length <= 3 ? [menuBtn('Definir', () => void showDefinition(sel))] : []),
       menuBtn('Buscar', () => {
         reader?.clearSelection();
         openSearch(sel.text);
@@ -671,68 +715,155 @@ function currentTocEntry(flat: { entry: TocEntry }[], p: ReaderPosition, r: Read
 }
 
 function buildSettings(panel: HTMLElement, onChange: (s: ReaderSettings) => void) {
+  // Re-rendered on every change so segmented controls and the font list stay in sync.
+  const change = (s: ReaderSettings) => {
+    onChange(s);
+    render();
+  };
   const seg = <T extends string | number | boolean>(label: string, key: keyof ReaderSettings, options: [T, string][]) => {
-    const wrap = el('div', {}, el('label', { textContent: label }));
     const row = el('div', { className: 'seg' });
     for (const [value, text] of options) {
-      const b = el('button', { textContent: text });
-      b.classList.toggle('on', settings[key] === value);
-      b.onclick = () => {
-        row.querySelectorAll('button').forEach((x) => x.classList.remove('on'));
-        b.classList.add('on');
-        onChange({ ...settings, [key]: value });
-      };
+      const b = el('button', { textContent: text, className: settings[key] === value ? 'on' : '' });
+      b.onclick = () => change({ ...settings, [key]: value });
       row.append(b);
     }
-    wrap.append(row);
-    return wrap;
+    return el('div', {}, el('label', { textContent: label }), row);
   };
 
-  const sizeRow = el('div', { className: 'seg' });
-  const sizeLabel = el('button', { textContent: `${settings.fontSize}px`, disabled: true });
-  const size = (d: number) => {
-    const fontSize = Math.max(12, Math.min(34, settings.fontSize + d));
-    sizeLabel.textContent = `${fontSize}px`;
-    onChange({ ...settings, fontSize });
+  const fontList = () => {
+    const list = el('div', { className: 'fonts' });
+    for (const f of userFonts) {
+      const choice = `user:${f.id}` as const;
+      const b = el('button', { className: `font-chip${settings.fontFamily === choice ? ' on' : ''}`, textContent: f.name, title: f.name });
+      b.style.fontFamily = `"__user_font_${f.id}", serif`;
+      b.onclick = () => change({ ...settings, fontFamily: choice });
+      const del = el('button', { className: 'font-del', title: `Quitar ${f.name}`, textContent: '×' });
+      del.onclick = async () => {
+        await fontStore.remove(f.id);
+        userFonts = userFonts.filter((x) => x !== f);
+        unregisterUserFont(f.id);
+        change(settings.fontFamily === choice ? { ...settings, fontFamily: 'serif' } : settings);
+      };
+      list.append(el('span', { className: 'font-item' }, b, del));
+    }
+    const input = el('input', { type: 'file', accept: '.ttf,.otf,.woff,.woff2', hidden: true });
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const f = await importFont(file);
+      change({ ...settings, fontFamily: `user:${f.id}` });
+    };
+    list.append(el('button', { className: 'font-chip add', textContent: '+ Importar fuente', onclick: () => input.click() }), input);
+    return el('div', {}, el('label', { textContent: 'Mis fuentes' }), list);
   };
-  sizeRow.append(el('button', { textContent: 'A−', onclick: () => size(-1) }), sizeLabel, el('button', { textContent: 'A+', onclick: () => size(1) }));
 
-  panel.append(
-    el('div', {}, el('label', { textContent: 'Tamaño' }), sizeRow),
-    seg('Tipografía', 'fontFamily', [
-      ['serif', 'Serif'],
-      ['sans', 'Sans'],
-      ['book', 'Libro'],
-    ]),
-    seg('Interlineado', 'lineHeight', [
-      [1.3, 'Compacto'],
-      [1.5, 'Normal'],
-      [1.75, 'Amplio'],
-    ]),
-    seg('Márgenes', 'margin', [
-      [0.6, 'Estrechos'],
-      [1, 'Normales'],
-      [1.6, 'Anchos'],
-    ]),
-    seg('Tema', 'theme', [
-      ['paper', 'Papel'],
-      ['sepia', 'Sepia'],
-      ['night', 'Noche'],
-    ]),
-    seg('Páginas', 'spread', [
-      ['auto', 'Libro abierto'],
-      ['single', 'Una página'],
-    ]),
-    seg('Barra de estado', 'statusBar', [
-      [true, 'Visible'],
-      [false, 'Oculta'],
-    ]),
-  );
+  const render = () => {
+    const sizeRow = el('div', { className: 'seg' });
+    const size = (d: number) => change({ ...settings, fontSize: Math.max(12, Math.min(34, settings.fontSize + d)) });
+    sizeRow.append(
+      el('button', { textContent: 'A−', onclick: () => size(-1) }),
+      el('button', { textContent: `${settings.fontSize}px`, disabled: true }),
+      el('button', { textContent: 'A+', onclick: () => size(1) }),
+    );
+    panel.replaceChildren(
+      el('div', {}, el('label', { textContent: 'Tamaño' }), sizeRow),
+      seg('Tipografía', 'fontFamily', [
+        ['serif', 'Serif'],
+        ['sans', 'Sans'],
+        ['book', 'Libro'],
+      ]),
+      fontList(),
+      seg('Alineación', 'align', [
+        ['book', 'Original'],
+        ['justify', 'Justificada'],
+        ['left', 'Izquierda'],
+      ]),
+      seg('Guiones', 'hyphenate', [
+        [true, 'Sí'],
+        [false, 'No'],
+      ]),
+      seg('Párrafos', 'paragraphs', [
+        ['book', 'Original'],
+        ['indent', 'Sangría'],
+        ['spaced', 'Separados'],
+      ]),
+      seg('Interlineado', 'lineHeight', [
+        [1.3, 'Compacto'],
+        [1.5, 'Normal'],
+        [1.75, 'Amplio'],
+      ]),
+      seg('Márgenes', 'margin', [
+        [0.6, 'Estrechos'],
+        [1, 'Normales'],
+        [1.6, 'Anchos'],
+      ]),
+      seg('Tema', 'theme', [
+        ['paper', 'Papel'],
+        ['sepia', 'Sepia'],
+        ['night', 'Noche'],
+      ]),
+      seg('Páginas', 'spread', [
+        ['auto', 'Libro abierto'],
+        ['single', 'Una página'],
+      ]),
+      seg('Barra de estado', 'statusBar', [
+        [true, 'Visible'],
+        [false, 'Oculta'],
+      ]),
+    );
+  };
+  render();
+}
+
+/* ------------------------------------------------------------------- Fonts */
+
+let userFonts: UserFont[] = [];
+
+function fontDataUrl(f: UserFont): string {
+  const bytes = new Uint8Array(f.data);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return `data:${f.type};base64,${btoa(bin)}`;
+}
+
+const FONT_TYPES: Record<string, string> = { ttf: 'font/ttf', otf: 'font/otf', woff: 'font/woff', woff2: 'font/woff2' };
+
+async function importFont(file: File): Promise<UserFont> {
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? 'ttf';
+  const f: UserFont = {
+    id: Date.now().toString(36),
+    name: file.name.replace(/\.[^.]+$/, '').replace(/[-_]+/g, ' '),
+    type: FONT_TYPES[ext] ?? 'font/ttf',
+    data: await file.arrayBuffer(),
+  };
+  await fontStore.put(f);
+  registerUserFont(f.id, fontDataUrl(f));
+  userFonts.push(f);
+  previewFonts();
+  return f;
+}
+
+async function loadFonts() {
+  userFonts = await fontStore.list().catch(() => []);
+  for (const f of userFonts) registerUserFont(f.id, fontDataUrl(f));
+  previewFonts();
+}
+
+/** The settings panel shows each font name in its own face. */
+function previewFonts() {
+  const css = userFonts.map((f) => `@font-face{font-family:"__user_font_${f.id}";src:url("${fontDataUrl(f)}")}`).join('');
+  let style = document.getElementById('user-fonts');
+  if (!style) {
+    style = el('style', { id: 'user-fonts' });
+    document.head.append(style);
+  }
+  style.textContent = css;
 }
 
 /* --------------------------------------------------------------------- Boot */
 
 async function boot() {
+  await loadFonts();
   try {
     const file = await openedFile();
     if (file) {

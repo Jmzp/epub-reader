@@ -155,6 +155,7 @@ export class Section {
     });
     await this.waitForImages();
     this.applyLayout(layout, css);
+    await this.fontsReady();
   }
 
   applyLayout(layout: Layout, css: string) {
@@ -162,6 +163,23 @@ export class Section {
     this.sizeFrame(layout);
     const style = this.doc.getElementById(READER_STYLE_ID);
     if (style) style.textContent = css;
+    this.measure();
+  }
+
+  /**
+   * Web fonts (the book's or imported ones) load asynchronously, and pages measured
+   * with fallback metrics are wrong. Resolves true when the page count changed.
+   */
+  async fontsReady(): Promise<boolean> {
+    const before = this.pageCount;
+    await this.doc.fonts?.ready;
+    if (!this.layout) return false;
+    this.measure();
+    return this.pageCount !== before;
+  }
+
+  private measure() {
+    const layout = this.layout!;
     const body = this.doc.body;
     body.style.transform = 'none';
     // body.scrollWidth ≈ N*pageW - marginX (or N*pageW when trailing padding is counted).

@@ -25,6 +25,7 @@ fn opened_file_bytes() -> Result<Response, String> {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![opened_file_name, opened_file_bytes])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

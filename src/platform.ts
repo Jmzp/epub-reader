@@ -22,3 +22,13 @@ export async function toggleFullscreen() {
   if (document.fullscreenElement) await document.exitFullscreen();
   else await document.documentElement.requestFullscreen();
 }
+
+/** Opens a web page in the system browser. */
+export async function openExternal(url: string) {
+  if (isTauri) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    await openUrl(url);
+    return;
+  }
+  window.open(url, '_blank', 'noopener');
+}

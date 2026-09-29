@@ -459,9 +459,19 @@ export class Reader {
     this.textures.clear();
     this.turner.setLayout(this.turnLayout());
     for (const s of this.sections.values()) s.applyLayout(next, this.css);
-    if (section) this.cur.page = this.align(anchor ? section.pageOfAnchor(anchor) : 0);
-    this.show();
-    this.afterMove();
+    const realign = () => {
+      if (section) this.cur.page = this.align(anchor ? section.pageOfAnchor(anchor) : 0);
+      this.show();
+      this.afterMove();
+    };
+    realign();
+    // A new typeface arrives a moment later and re-paginates: stay on the same passage.
+    const key = next.key;
+    void Promise.all([...this.sections.values()].map((s) => s.fontsReady())).then((changed) => {
+      if (this.destroyed || this.layout.key !== key || !changed.some(Boolean) || this.turner.busy) return;
+      this.textures.clear();
+      realign();
+    });
   }
 
   private alignIn(section: Section, page: number): number {
