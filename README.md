@@ -1,54 +1,56 @@
-# Lector EPUB
+# EPUB Reader
 
-Lector de EPUB de escritorio con **paso de página realista**. La hoja se toma con el dedo, el lápiz o el mouse, se curva en 3D siguiendo el gesto y se asienta con física de resorte. Está pensado para **Windows on ARM (Surface)**, con un binario nativo `aarch64` sobre WebView2, y también corre en macOS.
+A desktop EPUB reader with **realistic page turning**: grab the page with a finger, pen or mouse and it curls in 3D under your gesture, then settles with spring physics. Built for **Windows on ARM (Surface)** as a native `aarch64` binary on WebView2, and it runs on macOS too.
 
-![Libro abierto pasando una página](docs/curl-spread.png)
+![Two-page spread mid-turn](docs/curl-spread.png)
 
 <table>
   <tr>
-    <td width="42%"><img src="docs/curl-single.png" alt="Una página en tema sepia, girando desde la esquina superior" /></td>
-    <td><img src="docs/night-toc.png" alt="Tema noche con el índice abierto" /></td>
+    <td width="42%"><img src="docs/curl-single.png" alt="Single page in sepia theme, turned from the top corner" /></td>
+    <td><img src="docs/night-toc.png" alt="Night theme with the table of contents open" /></td>
   </tr>
 </table>
 
-## Características
+## Features
 
-- **Curl 3D en WebGL2.** La página se envuelve sobre un cilindro, con iluminación, reverso visible, sombra proyectada y sombra del lomo. Se puede agarrar desde cualquier esquina o borde, y al soltar decide si completa o vuelve según la posición y la velocidad (flick).
-- **Libro abierto o una página.** En horizontal muestra dos páginas con lomo al centro; en vertical o en ventanas angostas, una sola.
-- **Hojeo al saltar de capítulo.** Al elegir un capítulo del índice pasan varias páginas reales hasta llegar.
-- **Vuelve donde quedaste.** La posición se guarda como un ancla de texto, así que sobrevive a cambios de fuente, tamaño de ventana y rotación.
-- **Biblioteca** con portadas y progreso. Los libros se abren desde un diálogo o arrastrándolos a la ventana; con el instalador, también con doble clic en el `.epub`.
-- **Ajustes de lectura:** tamaño, tipografía, interlineado, márgenes, temas papel, sepia y noche, y modo de página.
-- **Entrada completa:** táctil, lápiz, mouse, rueda y teclado (`←` `→` `PgUp` `PgDn` `Espacio` `F11`).
-- **EPUB 2 y EPUB 3:** OPF, spine, NCX o nav, portada, CSS e imágenes del libro.
+- **3D page curl in WebGL2.** The page wraps around a cylinder, with lighting, a visible back side, a cast shadow and spine shading. You can grab any corner or edge; on release, the page completes or falls back depending on position and flick velocity.
+- **Two-page spread or single page.** Landscape shows an open book with the spine in the middle; portrait or narrow windows show one page.
+- **Riffle when jumping.** Picking a chapter from the table of contents flips through real pages until it lands there.
+- **Picks up where you left off.** The reading position is stored as a text anchor, so it survives font, window-size and rotation changes.
+- **Library** with covers and progress. Open books from a file dialog or by dropping them on the window; with the installer, also by double-clicking an `.epub`.
+- **Reading settings:** font size, typeface, line height, margins, paper/sepia/night themes and page mode.
+- **Full input support:** touch, pen, mouse, wheel and keyboard (`←` `→` `PgUp` `PgDn` `Space` `F11`).
+- **EPUB 2 and EPUB 3:** OPF, spine, NCX or nav document, cover, and the book's own CSS and images.
 
-## Probarlo en una Surface
+The app UI is currently in Spanish.
 
-El instalador y el portable salen de la compilación ARM64 (ver más abajo). Para ejecutarlos:
+## Trying it on a Surface
 
-| Archivo | Uso |
+The installer and the portable build come from the ARM64 build (see below):
+
+| File | Use |
 | --- | --- |
-| `Lector EPUB_<versión>_arm64-setup.exe` | Instalador por usuario, sin admin. Asocia los `.epub` e instala WebView2 si falta. |
-| `epub-reader.exe` | Portable. Requiere WebView2, que Windows 11 ya trae. |
+| `Lector EPUB_<version>_arm64-setup.exe` | Per-user installer, no admin needed. Associates `.epub` files and installs WebView2 if missing. |
+| `epub-reader.exe` | Portable. Requires WebView2, which ships with Windows 11. |
 
-> La app no está firmada: SmartScreen mostrará un aviso. Se pasa con **Más información → Ejecutar de todas formas**.
+> The app is not code-signed, so SmartScreen will warn about it. Click **More info → Run anyway**.
 
-## Desarrollo
+## Development
 
-Requisitos: Node 22+ y Rust (solo para la app nativa).
+Requirements: Node 22+ and Rust (only for the native app).
 
 ```bash
 npm install
-npm run dev          # lector en http://localhost:1420
-npm test             # tests del parser EPUB
-npm run tauri dev    # app nativa (macOS / Windows)
+npm run dev          # reader at http://localhost:1420
+npm test             # EPUB parser tests
+npm run tauri dev    # native app (macOS / Windows)
 ```
 
-`http://localhost:1420/curl-lab.html` es un laboratorio aislado del curl, con páginas sintéticas y HUD de fps. Con `?debug`, la función `pose(x, y)` en la consola congela una pose del curl.
+`http://localhost:1420/curl-lab.html` is an isolated playground for the page curl, with synthetic pages and an fps HUD. With `?debug`, `pose(x, y)` in the console freezes a curl pose.
 
-## Compilar para Windows ARM64
+## Building for Windows ARM64
 
-**Desde macOS** (cross-compile con [cargo-xwin](https://github.com/rust-cross/cargo-xwin)):
+**From macOS** (cross-compiling with [cargo-xwin](https://github.com/rust-cross/cargo-xwin)):
 
 ```bash
 brew install llvm lld nsis
@@ -58,42 +60,42 @@ export PATH="/opt/homebrew/opt/llvm/bin:/opt/homebrew/opt/lld/bin:$PATH"
 npx tauri build --runner cargo-xwin --target aarch64-pc-windows-msvc
 ```
 
-cargo-xwin descarga el CRT y el SDK de Windows de Microsoft, lo que implica aceptar su licencia. El resultado queda en `src-tauri/target/aarch64-pc-windows-msvc/release/`: el portable `epub-reader.exe` y el instalador en `bundle/nsis/`.
+cargo-xwin downloads Microsoft's CRT and Windows SDK, which means accepting Microsoft's license. The output goes to `src-tauri/target/aarch64-pc-windows-msvc/release/`: the portable `epub-reader.exe`, plus the installer under `bundle/nsis/`.
 
-**En GitHub Actions**: el workflow [`windows-arm64.yml`](.github/workflows/windows-arm64.yml) compila en el runner nativo `windows-11-arm`. Se lanza a mano (*Run workflow*) o al publicar un tag `v*`, y deja ambos ejecutables como artefacto.
+**On GitHub Actions:** the [`windows-arm64.yml`](.github/workflows/windows-arm64.yml) workflow builds on the native `windows-11-arm` runner. Trigger it manually (*Run workflow*) or by pushing a `v*` tag; both executables are uploaded as an artifact.
 
-## Cómo funciona
+## How it works
 
 ```
-EPUB (zip) ──► parser (fflate + DOMParser) ──► un iframe por capítulo, paginado con CSS multi-column
+EPUB (zip) ──► parser (fflate + DOMParser) ──► one iframe per chapter, paginated with CSS multi-column
                                                     │
-                           en reposo: DOM real      │   al empezar un gesto:
-                           (texto nítido)           ▼   páginas → SVG foreignObject → canvas → textura GPU
+                           at rest: live DOM        │   when a gesture starts:
+                           (crisp text)             ▼   pages → SVG foreignObject → canvas → GPU texture
                                                         │
-                                   PageTurner (gestos + resorte) ──► CurlRenderer (WebGL2, malla 64×80)
+                                   PageTurner (gestures + spring) ──► CurlRenderer (WebGL2, 64×80 mesh)
 ```
 
-- **Paginación.** Cada capítulo vive en un iframe aislado (sin scripts) con CSS multi-column. Una página equivale a una columna y cambiar de página es un `translate3d`.
-- **Texturas.** Las páginas se rasterizan en grupos a través de un SVG `<foreignObject>`, a la resolución real de la pantalla, y se suben a la GPU una vez. Esto ocurre solo con el lector en reposo, nunca durante un giro. Las páginas vecinas se precargan.
-- **Curl.** La geometría es estática: por frame solo cambian unos pocos uniforms (eje del doblez, dirección y radio), así que el costo de CPU es prácticamente nulo. El eje sale de la bisectriz entre la esquina tomada y el dedo, corregida por el radio: `d = (L + πR) / 2`. La esquina queda sujeta al lomo, así que la hoja no se puede "arrancar".
-- **Fluidez.** Usa Pointer Events con `getCoalescedEvents` y `getPredictedEvents`. Dibuja solo dentro de `requestAnimationFrame` y solo mientras hay animación. El resorte está críticamente amortiguado y hereda la velocidad del dedo al soltar.
-- **Windows ARM64.** El binario es nativo `aarch64-pc-windows-msvc` (nunca x64 emulado). WebGL corre con `powerPreference: high-performance`, sin MSAA cuando la densidad de píxeles es 2× o más (en Adreno sale caro) y con `desynchronized: true` para bajar la latencia del lápiz.
+- **Pagination.** Each chapter lives in a sandboxed iframe (no scripts) laid out with CSS multi-column. One page is one column, and changing pages is a `translate3d`.
+- **Textures.** Pages are rasterized in batches through an SVG `<foreignObject>` at the display's real resolution, then uploaded to the GPU once. This only happens while the reader is idle, never during a turn, and neighbouring pages are prefetched.
+- **Curl.** The mesh is static; each frame only updates a few uniforms (fold axis, direction and radius), so the per-frame CPU cost is close to zero. The axis comes from the perpendicular bisector between the grabbed corner and the finger, corrected for the cylinder radius: `d = (L + πR) / 2`. The corner stays attached to the spine, so the page can't be "torn off".
+- **Smoothness.** Pointer Events with `getCoalescedEvents` and `getPredictedEvents`. Drawing happens only inside `requestAnimationFrame`, and only while something is animating. The spring is critically damped and inherits the finger's velocity on release.
+- **Windows ARM64.** Native `aarch64-pc-windows-msvc` binary (never emulated x64). WebGL uses `powerPreference: high-performance`, skips MSAA at 2× pixel density or above (it's expensive on Adreno GPUs), and sets `desynchronized: true` to cut pen latency.
 
-## Estructura
+## Project layout
 
-| Ruta | Contenido |
+| Path | Contents |
 | --- | --- |
-| `src/epub/book.ts` | Parser EPUB 2/3: metadatos, spine, índice, portada |
-| `src/epub/resources.ts` | Recursos del zip como URLs `blob:` o `data:`, con reescritura de CSS |
-| `src/reader/section.ts` | Capítulo en iframe, paginación, anclas y rasterizado a SVG |
-| `src/reader/pageCache.ts` | Caché LRU de texturas en GPU |
-| `src/reader/curl/` | Shaders, física del curl, gestos (`PageTurner`) y renderer WebGL2 |
-| `src/reader/Reader.ts` | Orquestación: navegación, prefetch, hojeo y persistencia |
-| `src/main.ts`, `src/ui/` | Biblioteca, barras, índice y ajustes |
-| `src/storage.ts` | Biblioteca (IndexedDB) y posición y ajustes (localStorage) |
-| `src-tauri/` | Shell nativo: ventana, apertura por asociación `.epub` y bundle NSIS |
+| `src/epub/book.ts` | EPUB 2/3 parser: metadata, spine, table of contents, cover |
+| `src/epub/resources.ts` | Zip resources as `blob:` or `data:` URLs, with CSS rewriting |
+| `src/reader/section.ts` | Chapter iframe, pagination, anchors and SVG rasterization |
+| `src/reader/pageCache.ts` | LRU cache of GPU textures |
+| `src/reader/curl/` | Shaders, curl physics, gestures (`PageTurner`) and the WebGL2 renderer |
+| `src/reader/Reader.ts` | Orchestration: navigation, prefetching, riffle and persistence |
+| `src/main.ts`, `src/ui/` | Library, toolbars, table of contents and settings |
+| `src/storage.ts` | Library (IndexedDB), reading position and settings (localStorage) |
+| `src-tauri/` | Native shell: window, `.epub` file association and NSIS bundle |
 
-## Limitaciones conocidas
+## Known limitations
 
-- Todavía no se puede seleccionar texto: la capa de gestos cubre la página.
-- Las fuentes web embebidas en el EPUB pueden verse con la fuente de respaldo durante el giro.
+- Text selection is not supported yet: the gesture layer covers the page.
+- Web fonts embedded in an EPUB may render with a fallback font during a turn.
