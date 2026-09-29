@@ -21,6 +21,10 @@ export interface TurnSource {
   tapCenter?(): void;
   /** Any tap; return true when handled (e.g. a link was followed). */
   tap?(p: Vec2): boolean;
+  /** Long press without moving: return true to start a text selection there. */
+  selectStart?(p: Vec2): boolean;
+  selectMove?(p: Vec2): void;
+  selectEnd?(): void;
 }
 
 export interface TurnLayout {
@@ -33,6 +37,7 @@ export interface TurnLayout {
 type State =
   | { kind: 'idle' }
   | { kind: 'pressed'; id: number; start: Vec2; t: number }
+  | { kind: 'selecting'; id: number }
   | { kind: 'dragging'; id: number | null; dir: Dir; start: Vec2; corner: Vec2; cornerMode: boolean; ready: boolean }
   | { kind: 'settling'; dir: Dir; corner: Vec2; spring: Spring; complete: boolean }
   | {
@@ -48,6 +53,7 @@ type State =
 
 const DRAG_SLOP = 6;
 const FLICK = 350; // px/s
+const LONG_PRESS = 450; // ms
 
 /**
  * Turns pointer input into a physically plausible page curl.
@@ -63,6 +69,7 @@ export class PageTurner {
   private lastT = 0;
   private queued: Dir | null = null;
   private canvasShown = false;
+  private pressTimer = 0;
   onFrameStats?: (ms: number) => void;
 
   constructor(
@@ -78,7 +85,7 @@ export class PageTurner {
   }
 
   get busy(): boolean {
-    return this.state.kind !== 'idle' && this.state.kind !== 'pressed';
+    return this.state.kind !== 'idle' && this.state.kind !== 'pressed' && this.state.kind !== 'selecting';
   }
 
   setLayout(l: TurnLayout) {
@@ -88,7 +95,7 @@ export class PageTurner {
 
   /** Animated turn (tap, keyboard, wheel). */
   flip(dir: Dir) {
-    if (this.state.kind === 'riffle') return;
+    if (this.state.kind === 'riffle' || this.state.kind === 'selecting') return;
     if (this.state.kind === 'settling' || this.state.kind === 'dragging') {
       if (this.state.kind === 'settling') this.queued = dir;
       return;
@@ -160,7 +167,16 @@ export class PageTurner {
 
   private onDown = (e: PointerEvent) => {
     if (e.button > 0 || this.state.kind !== 'idle') return;
-    this.state = { kind: 'pressed', id: e.pointerId, start: this.local(e), t: e.timeStamp };
+    const start = this.local(e);
+    this.state = { kind: 'pressed', id: e.pointerId, start, t: e.timeStamp };
+    clearTimeout(this.pressTimer);
+    // Holding still selects text (like any touch reader); moving first turns the page.
+    this.pressTimer = window.setTimeout(() => {
+      const s = this.state;
+      if (s.kind === 'pressed' && s.id === e.pointerId && this.source.selectStart?.(start)) {
+        this.state = { kind: 'selecting', id: s.id };
+      }
+    }, LONG_PRESS);
     this.tracker.reset();
     this.tracker.add(e.timeStamp, e.clientX, e.clientY);
     try {
@@ -172,6 +188,10 @@ export class PageTurner {
 
   private onMove = (e: PointerEvent) => {
     const s = this.state;
+    if (s.kind === 'selecting' && s.id === e.pointerId) {
+      this.source.selectMove?.(this.local(e));
+      return;
+    }
     if ((s.kind !== 'pressed' && s.kind !== 'dragging') || s.id !== e.pointerId) return;
     const events = e.getCoalescedEvents?.() ?? [];
     for (const ce of events.length ? events : [e]) this.tracker.add(ce.timeStamp, ce.clientX, ce.clientY);
@@ -186,6 +206,7 @@ export class PageTurner {
       const dx = p.x - s.start.x;
       if (Math.hypot(dx, p.y - s.start.y) < DRAG_SLOP || Math.abs(dx) < 2) return;
       const dir: Dir = dx < 0 ? 1 : -1;
+      clearTimeout(this.pressTimer);
       if (!this.source.hasView(dir)) return;
       const { W, H } = this.sheetSize();
       const band = H * 0.22;
@@ -202,6 +223,13 @@ export class PageTurner {
 
   private onUp = (e: PointerEvent) => {
     const s = this.state;
+    clearTimeout(this.pressTimer);
+    if (s.kind === 'selecting' && s.id === e.pointerId) {
+      if (this.input.hasPointerCapture(e.pointerId)) this.input.releasePointerCapture(e.pointerId);
+      this.state = { kind: 'idle' };
+      this.source.selectEnd?.();
+      return;
+    }
     if ((s.kind !== 'pressed' && s.kind !== 'dragging') || s.id !== e.pointerId) return;
     if (this.input.hasPointerCapture(e.pointerId)) this.input.releasePointerCapture(e.pointerId);
 
@@ -367,6 +395,7 @@ export class PageTurner {
 
   destroy() {
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.pressTimer);
     this.input.removeEventListener('pointerdown', this.onDown);
     this.input.removeEventListener('pointermove', this.onMove);
     this.input.removeEventListener('pointerup', this.onUp);

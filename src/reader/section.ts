@@ -6,11 +6,33 @@ const XHTML_NS = 'http://www.w3.org/1999/xhtml';
 const XLINK_NS = 'http://www.w3.org/1999/xlink';
 const READER_STYLE_ID = '__reader_style';
 const READER_PLACEHOLDER = '/*__READER_CSS__*/';
+const MARKS_ID = '__reader_marks';
 
 /** A position inside a section that survives re-pagination (font/size changes). */
 export interface Anchor {
   path: number[];
   offset: number;
+}
+
+/** A painted text range (highlight, search hit, live selection). */
+export interface Mark {
+  id: string;
+  start: Anchor;
+  end: Anchor;
+  /** CSS color of the fill, drawn under the text. */
+  color: string;
+  /** Adds a thin line under the text (highlights carrying a note). */
+  underline?: boolean;
+}
+
+interface MarkRect {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+  underline: boolean;
 }
 
 /**
@@ -92,6 +114,10 @@ export class Section {
   private rasterTemplate?: string;
   private layout?: Layout;
   private shownPage = 0;
+  private marks: Mark[] = [];
+  private transient: Mark[] = [];
+  /** Mark rectangles in unshifted section coordinates (page p spans p*pageW..(p+1)*pageW). */
+  private rects: MarkRect[] = [];
 
   constructor(
     readonly index: number,
@@ -141,6 +167,7 @@ export class Section {
     // body.scrollWidth ≈ N*pageW - marginX (or N*pageW when trailing padding is counted).
     this.pageCount = Math.max(1, Math.round((body.scrollWidth + layout.marginX) / layout.pageW));
     this.showPage(Math.min(this.shownPage, this.lastViewPage()));
+    this.paintMarks();
   }
 
   /** First page index of the last view (views are pagesPerView pages wide). */
@@ -153,6 +180,8 @@ export class Section {
     this.shownPage = page;
     const pageW = this.layout?.pageW ?? 0;
     this.doc.body.style.transform = `translate3d(${-page * pageW}px,0,0)`;
+    const layer = this.doc.getElementById(MARKS_ID);
+    if (layer) layer.style.transform = `translate3d(${-page * pageW}px,0,0)`;
   }
 
   private sizeFrame(l: Layout) {
@@ -243,6 +272,129 @@ export class Section {
     return rect ? this.pageOfX(rect.left + this.shift() + 1) : 0;
   }
 
+  /* ---------------------------------------------------------------- Marks */
+
+  /**
+   * Persistent marks (highlights) are painted in the live DOM and in rasterized pages, so
+   * they look the same at rest and while turning. Callers must drop this section's
+   * textures after changing them.
+   */
+  setMarks(marks: Mark[]) {
+    this.marks = marks;
+    this.paintMarks();
+  }
+
+  /** Live-only marks (selection, search hit); they never reach the textures. */
+  setTransientMarks(marks: Mark[]) {
+    this.transient = marks;
+    this.paintMarks();
+  }
+
+  /** Id of the persistent mark under a point of the current view, if any. */
+  markAt(x: number, y: number): string | null {
+    const ux = x + this.shift();
+    const hit = this.rects.find((r) => ux >= r.x && ux <= r.x + r.w && y >= r.y - 2 && y <= r.y + r.h + 2);
+    return hit?.id ?? null;
+  }
+
+  /** Bounding box, in view coordinates, of the part of a range visible on the current view. */
+  viewRect(start: Anchor, end: Anchor): DOMRect | null {
+    const range = this.range(start, end);
+    if (!range) return null;
+    const l = this.layout!;
+    const rects = [...range.getClientRects()].filter((r) => r.width > 0 && r.right > 0 && r.left < l.viewW);
+    if (!rects.length) return null;
+    const x = Math.min(...rects.map((r) => r.left));
+    const y = Math.min(...rects.map((r) => r.top));
+    return new DOMRect(x, y, Math.max(...rects.map((r) => r.right)) - x, Math.max(...rects.map((r) => r.bottom)) - y);
+  }
+
+  private paintMarks() {
+    if (!this.layout || !this.doc?.body) return;
+    this.rects = this.measureMarks(this.marks);
+    const live = [...this.rects, ...this.measureMarks(this.transient)];
+    let layer = this.doc.getElementById(MARKS_ID);
+    if (!layer) {
+      layer = this.doc.createElementNS(XHTML_NS, 'div') as HTMLElement;
+      layer.id = MARKS_ID;
+      // Outside <body> so node paths (anchors) never change, and before it so marks sit under the text.
+      this.doc.documentElement.insertBefore(layer, this.doc.body);
+    }
+    layer.style.cssText = `position:absolute;left:0;top:0;width:0;height:0;pointer-events:none;transform:translate3d(${-this.shift()}px,0,0)`;
+    layer.innerHTML = marksHtml(live);
+  }
+
+  private measureMarks(marks: Mark[]): MarkRect[] {
+    const out: MarkRect[] = [];
+    const shift = this.shift();
+    for (const m of marks) {
+      const range = this.range(m.start, m.end);
+      if (!range) continue;
+      // Per text node: a range spanning elements also reports their whole boxes.
+      for (const r of textRects(range)) {
+        out.push({ id: m.id, x: r.left + shift, y: r.top, w: r.width, h: r.height, color: m.color, underline: !!m.underline });
+      }
+    }
+    return out;
+  }
+
+  /** DOM range for two anchors of this section. */
+  range(start: Anchor, end: Anchor): Range | null {
+    const a = nodeAtPath(this.doc.body, start.path);
+    const b = nodeAtPath(this.doc.body, end.path);
+    if (!a || !b) return null;
+    const range = this.doc.createRange();
+    try {
+      range.setStart(a, Math.min(start.offset, nodeLength(a)));
+      range.setEnd(b, Math.min(end.offset, nodeLength(b)));
+    } catch {
+      return null;
+    }
+    return range.collapsed ? null : range;
+  }
+
+  anchorOf(node: Node, offset: number): Anchor {
+    return { path: nodePath(this.doc.body, node), offset };
+  }
+
+  /** Up to `max` characters of text starting at an anchor (bookmark labels). */
+  textFrom(a: Anchor, max = 90): string {
+    const start = nodeAtPath(this.doc.body, a.path);
+    if (!start) return '';
+    const walker = this.doc.createTreeWalker(this.doc.body, NodeFilter.SHOW_TEXT);
+    walker.currentNode = start;
+    let out = start.nodeType === Node.TEXT_NODE ? (start as Text).data.slice(a.offset) : '';
+    for (let n = walker.nextNode(); n && out.length < max * 2; n = walker.nextNode()) out += ' ' + (n as Text).data;
+    const text = out.replace(/\s+/g, ' ').trim();
+    return text.length > max ? text.slice(0, max).replace(/\s\S*$/, '') + '…' : text;
+  }
+
+  /** Text position under a point of the current view (view coordinates). */
+  caretAt(x: number, y: number): { node: Text; offset: number } | null {
+    const d = this.doc as Document & {
+      caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+    };
+    let node: Node | null = null;
+    let offset = 0;
+    if (d.caretPositionFromPoint) {
+      const p = d.caretPositionFromPoint(x, y);
+      if (p) ({ offsetNode: node, offset } = p);
+    } else if (d.caretRangeFromPoint) {
+      const r = d.caretRangeFromPoint(x, y);
+      if (r) ({ startContainer: node, startOffset: offset } = r);
+    }
+    if (!node || node.nodeType !== Node.TEXT_NODE || !this.doc.body.contains(node)) return null;
+    return { node: node as Text, offset };
+  }
+
+  /** Text of the section as flat text nodes (for search). */
+  static textNodes(root: Node): Text[] {
+    const out: Text[] = [];
+    const walker = root.ownerDocument!.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) out.push(n as Text);
+    return out;
+  }
+
   /**
    * SVG image string rendering `count` consecutive pages starting at `firstPage`,
    * Sized in CSS pixels; callers scale it when drawing. Uses data: URLs so it can be drawn to a canvas.
@@ -251,8 +403,13 @@ export class Section {
     const l = this.layout!;
     this.rasterTemplate ??= buildSectionXhtml(this.book, this.res, this.href, 'data');
     const w = count * l.pageW;
-    const override = `html{overflow:visible !important}body{transform:translateX(${-firstPage * l.pageW}px) !important}`;
-    const html = this.rasterTemplate.replace(READER_PLACEHOLDER, css + override);
+    const shift = -firstPage * l.pageW;
+    const override = `html{overflow:visible !important}body{transform:translateX(${shift}px) !important}`;
+    let html = this.rasterTemplate.replace(READER_PLACEHOLDER, css + override);
+    if (this.rects.length) {
+      const layer = `<div xmlns="${XHTML_NS}" style="position:absolute;left:0;top:0;width:0;height:0;transform:translateX(${shift}px)">${marksHtml(this.rects)}</div>`;
+      html = html.replace(/<body[\s>]/, (m) => layer + m);
+    }
     return (
       `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${l.viewH}" viewBox="0 0 ${w} ${l.viewH}">` +
       `<foreignObject x="0" y="0" width="${w}" height="${l.viewH}">${html}</foreignObject></svg>`
@@ -265,7 +422,40 @@ export class Section {
   }
 }
 
-function nodePath(root: Node, node: Node): number[] {
+function nodeLength(n: Node): number {
+  return n.nodeType === Node.TEXT_NODE ? (n as Text).length : n.childNodes.length;
+}
+
+function textRects(range: Range): DOMRect[] {
+  const doc = range.startContainer.ownerDocument!;
+  const root = range.commonAncestorContainer;
+  const nodes =
+    root.nodeType === Node.TEXT_NODE ? [root as Text] : Section.textNodes(root).filter((t) => range.intersectsNode(t));
+  const out: DOMRect[] = [];
+  const sub = doc.createRange();
+  for (const t of nodes) {
+    sub.selectNodeContents(t);
+    if (t === range.startContainer) sub.setStart(t, range.startOffset);
+    if (t === range.endContainer) sub.setEnd(t, range.endOffset);
+    if (sub.collapsed) continue;
+    for (const r of sub.getClientRects()) if (r.width > 0.5) out.push(r);
+  }
+  return out;
+}
+
+function marksHtml(rects: MarkRect[]): string {
+  let html = '';
+  for (const r of rects) {
+    const box = `position:absolute;left:${r.x.toFixed(1)}px;top:${r.y.toFixed(1)}px;width:${r.w.toFixed(1)}px;height:${r.h.toFixed(1)}px;background:${r.color};border-radius:2px`;
+    html += `<div style="${box}"></div>`;
+    if (r.underline) {
+      html += `<div style="position:absolute;left:${r.x.toFixed(1)}px;top:${(r.y + r.h - 1.5).toFixed(1)}px;width:${r.w.toFixed(1)}px;height:1.5px;background:${r.color};filter:saturate(3) brightness(0.7)"></div>`;
+    }
+  }
+  return html;
+}
+
+export function nodePath(root: Node, node: Node): number[] {
   const path: number[] = [];
   for (let n: Node | null = node; n && n !== root; n = n.parentNode) {
     path.unshift(Array.prototype.indexOf.call(n.parentNode!.childNodes, n));

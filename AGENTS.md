@@ -41,6 +41,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 | `src/reader/Reader.ts` | Orchestrator: sections, current view, `TurnSource`, prefetch, TOC riffle, persistence callbacks. |
 | `src/main.ts`, `src/ui/styles.css` | Library, toolbars, TOC, settings. |
 | `src/storage.ts` | IndexedDB library + localStorage settings/positions. |
+| `src/annotations.ts` | Highlights, notes, bookmarks (localStorage `notes:<bookId>`), Markdown export. |
 | `src-tauri/` | Minimal Rust shell: window, `.epub` file-association commands, NSIS bundle. |
 
 **Rest vs. turn:** at rest the live iframe DOM is shown (crisp, real text). When a turn starts, the WebGL canvas, already holding rasterized textures, covers it in the same frame. When the turn ends, the DOM shows the new page and the canvas hides. Anything visible at rest must look identical in the canvas, and vice versa.
@@ -56,6 +57,9 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 - **Textures in use must not be evicted.** Long animations (the riffle) `pin()` their pages and call `unpinAll()` when done.
 - **The sheet is rendered orthographically.** The shadows the lifted paper casts are computed in flat sheet space (`flippedEdgeShadow`, curl shadow). Adding perspective to the sheet makes paper and shadow drift apart and leaves a bright, unshadowed sliver along the flipped edge.
 - **The paper is matte.** Sheet lighting never exceeds the paper color. Anything brighter clips to white and shows up as a white stripe on the roll. The back of the sheet is shaded with one continuous gradient (darkest at the crest of the roll), and `flippedEdgeShadow` fades out when the free edge still rests on the roll. A step in brightness at the axis or at the end of the roll reads as a seam.
+- **Never mutate a section's `<body>`.** Anchors are node paths from `<body>`, so highlights, bookmarks and positions break if nodes are wrapped or inserted. Marks are painted as boxes in a layer that is a sibling *before* `<body>` (under the text), and `Section.rasterSvg` injects the same boxes, so highlights look identical at rest and while turning. After changing marks, drop that section's textures (`PageTextures.dropSection`), as `Reader.applyMarks` does.
+- **Search parses sections like the live iframe.** `Reader.search` runs `buildSectionXhtml` + an XHTML `DOMParser`, the same pipeline the iframe loads, so node paths from search hits resolve in the live document.
+- **Long press selects, movement turns.** `PageTurner` starts a selection after 450 ms without crossing the drag slop; any movement before that is a page turn.
 - **Positions are anchors, not page numbers.** Save and restore with `Section.anchorAt()` / `pageOfAnchor()` so font, size and rotation changes keep the reader on the same passage.
 - **ARM64 performance:** WebGL runs without MSAA at dpr ≥ 1.75, with `desynchronized: true` and `high-performance`. There are no per-frame allocations in the render loop, and the mesh is never rebuilt.
 

@@ -8,6 +8,8 @@ export interface ReaderSettings {
   margin: number; // multiplier: 0.6 narrow, 1 normal, 1.6 wide
   theme: ThemeName;
   spread: 'auto' | 'single';
+  /** Clock, battery, chapter page and book percentage along the bottom edge. */
+  statusBar: boolean;
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
@@ -17,6 +19,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   margin: 1,
   theme: 'paper',
   spread: 'auto',
+  statusBar: true,
 };
 
 export interface Theme {
@@ -28,14 +31,16 @@ export interface Theme {
   paperRgb: [number, number, number];
   /** How visible the mirrored text is through the back of a turning page (single-page mode). */
   showThrough: number;
+  /** Fill of the text selection and of search hits. */
+  selection: string;
 }
 
 const hex = (h: string): [number, number, number] => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255) as [number, number, number];
 
 export const THEMES: Record<ThemeName, Theme> = {
-  paper: { paper: '#fbf8f1', ink: '#1f1c17', link: '#7a4b12', desk: '#d9d3c7', paperRgb: hex('#fbf8f1'), showThrough: 0.3 },
-  sepia: { paper: '#f2e5c9', ink: '#3d2f1f', link: '#8a4f14', desk: '#cbbd9f', paperRgb: hex('#f2e5c9'), showThrough: 0.3 },
-  night: { paper: '#1f1e1c', ink: '#d6d1c6', link: '#d9a760', desk: '#0f0f0e', paperRgb: hex('#1f1e1c'), showThrough: 0.22 },
+  paper: { paper: '#fbf8f1', ink: '#1f1c17', link: '#7a4b12', desk: '#d9d3c7', paperRgb: hex('#fbf8f1'), showThrough: 0.3, selection: 'rgba(122,75,18,.22)' },
+  sepia: { paper: '#f2e5c9', ink: '#3d2f1f', link: '#8a4f14', desk: '#cbbd9f', paperRgb: hex('#f2e5c9'), showThrough: 0.3, selection: 'rgba(122,75,18,.22)' },
+  night: { paper: '#1f1e1c', ink: '#d6d1c6', link: '#d9a760', desk: '#0f0f0e', paperRgb: hex('#1f1e1c'), showThrough: 0.22, selection: 'rgba(217,167,96,.35)' },
 };
 
 const FONT_STACKS: Record<Exclude<FontChoice, 'book'>, string> = {
@@ -108,6 +113,6 @@ body > div:only-child > svg:only-child, body > svg:only-child {
   display: block; width: 100%; height: ${l.viewH - 2 * l.marginY - 4}px;
 }
 h1, h2, h3, h4, h5, h6 { break-after: avoid; page-break-after: avoid; }
-::selection { background: ${s.theme === 'night' ? 'rgba(217,167,96,.35)' : 'rgba(122,75,18,.22)'}; }
+::selection { background: ${t.selection}; }
 `;
 }

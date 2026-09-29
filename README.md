@@ -16,10 +16,14 @@ A desktop EPUB reader with **realistic page turning**: grab the page with a fing
 - **3D page curl in WebGL2.** The page wraps around a cylinder, with lighting, a visible back side, a cast shadow and spine shading. You can grab any corner or edge; on release, the page completes or falls back depending on position and flick velocity.
 - **Two-page spread or single page.** Landscape shows an open book with the spine in the middle; portrait or narrow windows show one page.
 - **Riffle when jumping.** Picking a chapter from the table of contents flips through real pages until it lands there.
+- **Highlights and notes.** Long-press a word, drag to extend the selection, then pick one of four highlight colors, add a note, copy, or search for it. Highlights are painted into the page textures too, so they curl with the page.
+- **Bookmarks** with a ribbon on the page, and a panel listing every note and bookmark. Notes can be copied as Markdown.
+- **Full-text search** across the whole book, ignoring case and accents, with the hit highlighted on arrival.
+- **Status bar** like a phone reader: clock, battery, chapter with page, and percentage of the book.
 - **Picks up where you left off.** The reading position is stored as a text anchor, so it survives font, window-size and rotation changes.
 - **Library** with covers and progress. Open books from a file dialog or by dropping them on the window; with the installer, also by double-clicking an `.epub`.
 - **Reading settings:** font size, typeface, line height, margins, paper/sepia/night themes and page mode.
-- **Full input support:** touch, pen, mouse, wheel and keyboard (`←` `→` `PgUp` `PgDn` `Space` `F11`).
+- **Full input support:** touch, pen, mouse, wheel and keyboard (`←` `→` `PgUp` `PgDn` `Space` `F11`, `Ctrl+F` to search).
 - **EPUB 2 and EPUB 3:** OPF, spine, NCX or nav document, cover, and the book's own CSS and images.
 
 The app UI is currently in Spanish.
@@ -93,9 +97,10 @@ EPUB (zip) ──► parser (fflate + DOMParser) ──► one iframe per chapte
 | `src/reader/Reader.ts` | Orchestration: navigation, prefetching, riffle and persistence |
 | `src/main.ts`, `src/ui/` | Library, toolbars, table of contents and settings |
 | `src/storage.ts` | Library (IndexedDB), reading position and settings (localStorage) |
+| `src/annotations.ts` | Highlights, notes and bookmarks: types, storage and Markdown export |
 | `src-tauri/` | Native shell: window, `.epub` file association and NSIS bundle |
 
 ## Known limitations
 
-- Text selection is not supported yet: the gesture layer covers the page.
+- Selection works by long press only (the gesture layer covers the page, so there is no native text selection).
 - Web fonts embedded in an EPUB may render with a fallback font during a turn.

@@ -1,3 +1,4 @@
+import { HIGHLIGHT_COLORS, type Highlight } from '../annotations';
 import type { Book } from '../epub/book';
 import { Resources } from '../epub/resources';
 import type { SavedLocation } from '../storage';
@@ -6,7 +7,7 @@ import { PageTurner, type Dir, type TurnSource, type ViewTextures } from './curl
 import { gutterDarkness } from './curl/shaders';
 import { computeLayout, readerCss, THEMES, type Layout, type ReaderSettings } from './layout';
 import { PageTextures } from './pageCache';
-import { Section } from './section';
+import { buildSectionXhtml, nodePath, Section, type Anchor, type Mark } from './section';
 
 export interface ReaderPosition {
   section: number;
@@ -21,7 +22,29 @@ export interface ReaderPosition {
 export interface ReaderCallbacks {
   onLocation(loc: SavedLocation, pos: ReaderPosition): void;
   onTapCenter(): void;
+  /** A text selection was made (null: it was dismissed). Rect is in view coordinates. */
+  onSelection?(sel: SelectionInfo | null): void;
+  /** A highlight was tapped. */
+  onHighlightTap?(id: string, rect: DOMRect): void;
 }
+
+export interface SelectionInfo {
+  section: number;
+  start: Anchor;
+  end: Anchor;
+  text: string;
+  rect: DOMRect;
+}
+
+export interface SearchHit {
+  section: number;
+  start: Anchor;
+  end: Anchor;
+  /** Text around the match: [before, match, after]. */
+  context: [string, string, string];
+}
+
+const MAX_HITS = 300;
 
 interface View {
   section: Section;
@@ -50,6 +73,14 @@ export class Reader {
   private wheelAccum = 0;
   private destroyed = false;
   private jumping = false;
+  private ribbon: HTMLElement;
+  private highlights: Highlight[] = [];
+  /** Serialized marks per section, to only re-rasterize sections whose marks changed. */
+  private markKeys = new Map<number, string>();
+  private selection: { section: Section; fixed: Range; range: Range } | null = null;
+  private flash: { section: number; mark: Mark } | null = null;
+  /** Where each spine item starts, as a fraction of the book's text (for the % read). */
+  private sectionStart: number[] = [];
 
   constructor(
     host: HTMLElement,
@@ -67,10 +98,19 @@ export class Reader {
     this.inputLayer.className = 'reader-input';
     this.gutter = document.createElement('div');
     this.gutter.className = 'reader-gutter';
-    this.el.append(this.frames, this.gutter, this.canvas, this.inputLayer);
+    // Under the canvas: a turning page hides the ribbon like it would on paper.
+    this.ribbon = document.createElement('div');
+    this.ribbon.className = 'reader-ribbon';
+    this.ribbon.hidden = true;
+    this.el.append(this.frames, this.gutter, this.ribbon, this.canvas, this.inputLayer);
     host.appendChild(this.el);
 
     this.res = new Resources(book);
+    // Weigh sections by size: a cover page must not count as half the book.
+    const sizes = book.spine.map((s) => (book.has(s.href) ? book.bytes(s.href).length : 0));
+    const total = sizes.reduce((a, b) => a + b, 0) || 1;
+    let acc = 0;
+    this.sectionStart = [...sizes.map((n) => ((acc += n) - n) / total), 1];
     this.renderer = new CurlRenderer(this.canvas);
     this.textures = new PageTextures(
       this.renderer,
@@ -129,26 +169,198 @@ export class Reader {
    * between, like thumbing through a book to reach the chapter.
    */
   async goTo(href: string, animate = true) {
-    if (this.turner.busy || this.jumping) return;
     const [path, frag] = href.split('#');
     const index = this.book.spine.findIndex((s) => s.href === path);
     if (index < 0) return;
+    await this.jump(index, (s) => (frag ? s.pageOfFragment(frag) : 0), animate);
+  }
+
+  /** Jumps to a text position (bookmark, highlight, search hit); `flashEnd` marks the range briefly. */
+  async goToAnchor(section: number, anchor: Anchor, flashEnd?: Anchor, animate = true) {
+    this.setFlash(null);
+    const ok = await this.jump(section, (s) => s.pageOfAnchor(anchor), animate);
+    if (ok && flashEnd) this.setFlash({ section, mark: { id: 'flash', start: anchor, end: flashEnd, color: THEMES[this.settings.theme].selection } });
+  }
+
+  private async jump(index: number, pageOf: (s: Section) => number, animate: boolean): Promise<boolean> {
+    if (this.turner.busy || this.jumping) return false;
+    this.clearSelection();
     this.jumping = true;
     try {
       const section = await this.ensureSection(index);
-      if (!section || this.destroyed) return;
-      const target = { section: index, page: this.alignIn(section, frag ? section.pageOfFragment(frag) : 0) };
+      if (!section || this.destroyed) return false;
+      const target = { section: index, page: this.alignIn(section, pageOf(section)) };
       const order = Math.sign(target.section - this.cur.section) || Math.sign(target.page - this.cur.page);
-      if (order === 0) return;
+      if (order === 0) return true;
       if (animate) await this.riffleTo(target, order as Dir);
       else {
         this.cur = target;
         this.show();
         this.afterMove();
       }
+      return true;
     } finally {
       this.jumping = false;
     }
+  }
+
+  /* ------------------------------------------------------------ Annotations */
+
+  setHighlights(list: Highlight[]) {
+    this.highlights = list;
+    for (const s of this.sections.values()) this.applyMarks(s);
+  }
+
+  private applyMarks(s: Section) {
+    const marks: Mark[] = this.highlights
+      .filter((h) => h.section === s.index)
+      .map((h) => ({ id: h.id, start: h.start, end: h.end, color: HIGHLIGHT_COLORS[h.color], underline: !!h.note }));
+    const key = JSON.stringify(marks);
+    if (this.markKeys.get(s.index) === key) return;
+    this.markKeys.set(s.index, key);
+    s.setMarks(marks);
+    this.textures.dropSection(s.index);
+    if (!this.turner.busy) {
+      clearTimeout(this.prefetchTimer);
+      this.prefetchTimer = window.setTimeout(() => this.prefetch(), 80);
+    }
+  }
+
+  /** Where the current view starts, with a short label (for bookmarks). */
+  currentAnchor(): { section: number; anchor: Anchor; snippet: string } | null {
+    const s = this.sections.get(this.cur.section);
+    const anchor = s?.anchorAt(this.cur.page);
+    if (!s || !anchor) return null;
+    return { section: s.index, anchor, snippet: s.textFrom(anchor) };
+  }
+
+  /** Whether a text position is on the pages currently shown. */
+  inView(section: number, anchor: Anchor): boolean {
+    const s = this.sections.get(this.cur.section);
+    if (!s || section !== this.cur.section) return false;
+    const page = s.pageOfAnchor(anchor);
+    return page >= this.cur.page && page < this.cur.page + this.ppv;
+  }
+
+  setRibbon(on: boolean) {
+    this.ribbon.hidden = !on;
+  }
+
+  /** Bounding box of a highlight on the current view (view coordinates). */
+  highlightRect(h: Highlight): DOMRect | null {
+    return h.section === this.cur.section ? (this.sections.get(h.section)?.viewRect(h.start, h.end) ?? null) : null;
+  }
+
+  private setFlash(f: { section: number; mark: Mark } | null) {
+    const prev = this.flash;
+    this.flash = f;
+    if (prev) this.sections.get(prev.section)?.setTransientMarks([]);
+    if (f) this.sections.get(f.section)?.setTransientMarks([f.mark]);
+  }
+
+  /* -------------------------------------------------------------- Selection */
+
+  private selectStart(p: { x: number; y: number }): boolean {
+    const s = this.sections.get(this.cur.section);
+    const caret = s?.caretAt(p.x, p.y);
+    if (!s || !caret) return false;
+    const word = wordRange(caret.node, caret.offset);
+    // caret*FromPoint snaps to the nearest text even from a blank margin: require a hit.
+    const hit = [...word.getClientRects()].some((r) => p.x >= r.left - 8 && p.x <= r.right + 8 && p.y >= r.top - 8 && p.y <= r.bottom + 8);
+    if (!hit || !word.toString().trim()) return false;
+    this.setFlash(null);
+    this.selection = { section: s, fixed: word, range: word.cloneRange() };
+    this.paintSelection();
+    navigator.vibrate?.(10);
+    return true;
+  }
+
+  private selectMove(p: { x: number; y: number }) {
+    const sel = this.selection;
+    const caret = sel?.section.caretAt(p.x, p.y);
+    if (!sel || !caret) return;
+    const word = wordRange(caret.node, caret.offset);
+    const range = sel.fixed.cloneRange();
+    if (word.compareBoundaryPoints(Range.START_TO_START, range) < 0) range.setStart(word.startContainer, word.startOffset);
+    if (word.compareBoundaryPoints(Range.END_TO_END, range) > 0) range.setEnd(word.endContainer, word.endOffset);
+    sel.range = range;
+    this.paintSelection();
+  }
+
+  private selectEnd() {
+    const sel = this.selection;
+    if (!sel) return;
+    const { start, end } = this.selectionAnchors();
+    const rect = sel.section.viewRect(start, end);
+    if (!rect) return this.clearSelection();
+    this.cb.onSelection?.({ section: sel.section.index, start, end, text: sel.range.toString(), rect });
+  }
+
+  private selectionAnchors() {
+    const { section, range } = this.selection!;
+    return {
+      start: section.anchorOf(range.startContainer, range.startOffset),
+      end: section.anchorOf(range.endContainer, range.endOffset),
+    };
+  }
+
+  private paintSelection() {
+    const sel = this.selection!;
+    const { start, end } = this.selectionAnchors();
+    sel.section.setTransientMarks([{ id: 'selection', start, end, color: THEMES[this.settings.theme].selection }]);
+  }
+
+  clearSelection() {
+    if (!this.selection) return;
+    this.selection.section.setTransientMarks([]);
+    this.selection = null;
+    this.cb.onSelection?.(null);
+  }
+
+  /* ----------------------------------------------------------------- Search */
+
+  /**
+   * Finds `query` in the whole book, ignoring case and accents. Each section is parsed
+   * the same way the live iframe is, so node paths (anchors) match the live DOM.
+   */
+  async search(query: string, isCancelled: () => boolean = () => false): Promise<SearchHit[]> {
+    const q = fold(query.trim());
+    const hits: SearchHit[] = [];
+    if (!q) return hits;
+    for (let index = 0; index < this.book.spine.length && hits.length < MAX_HITS; index++) {
+      if (isCancelled() || this.destroyed) return hits;
+      const xhtml = buildSectionXhtml(this.book, this.res, this.book.spine[index].href, 'blob');
+      const doc = new DOMParser().parseFromString(xhtml, 'application/xhtml+xml');
+      const body = doc.querySelector('body');
+      if (!body) continue;
+      const nodes = Section.textNodes(body);
+      const starts: number[] = [];
+      let text = '';
+      for (const n of nodes) {
+        starts.push(text.length);
+        text += n.data;
+      }
+      const folded = fold(text);
+      const at = (i: number): Anchor => {
+        let lo = 0;
+        let hi = nodes.length - 1;
+        while (lo < hi) {
+          const mid = (lo + hi + 1) >> 1;
+          if (starts[mid] <= i) lo = mid;
+          else hi = mid - 1;
+        }
+        return { path: nodePath(body, nodes[lo]), offset: i - starts[lo] };
+      };
+      for (let i = folded.indexOf(q); i >= 0 && hits.length < MAX_HITS; i = folded.indexOf(q, i + q.length)) {
+        const end = i + q.length;
+        const before = text.slice(Math.max(0, i - 50), i).replace(/\s+/g, ' ');
+        const after = text.slice(end, end + 60).replace(/\s+/g, ' ');
+        hits.push({ section: index, start: at(i), end: at(end), context: [before.replace(/^\S*\s/, '…'), text.slice(i, end), after] });
+      }
+      // Stay responsive on long books.
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    return hits;
   }
 
   private async riffleTo(target: { section: number; page: number }, dir: Dir) {
@@ -205,6 +417,7 @@ export class Reader {
   seekSection(fraction: number) {
     const s = this.sections.get(this.cur.section);
     if (!s || this.turner.busy) return;
+    this.clearSelection();
     this.cur.page = this.align(Math.round(fraction * (s.pageCount - 1)));
     this.show();
     this.afterMove();
@@ -274,6 +487,8 @@ export class Reader {
           if (this.destroyed) return null;
           if (section.layoutInfo?.key !== this.layout.key) section.applyLayout(this.layout, this.css);
           this.sections.set(index, section);
+          this.markKeys.delete(index);
+          this.applyMarks(section);
           return section;
         })
         .catch((err) => {
@@ -327,6 +542,8 @@ export class Reader {
       },
       begin: () => {
         clearTimeout(this.prefetchTimer);
+        this.clearSelection();
+        this.setFlash(null);
         this.canvas.style.visibility = 'visible';
       },
       end: () => {
@@ -335,8 +552,30 @@ export class Reader {
         this.afterMove();
       },
       tapCenter: () => this.cb.onTapCenter(),
-      tap: (p) => this.followLink(p.x, p.y),
+      tap: (p) => this.onTap(p.x, p.y),
+      selectStart: (p) => this.selectStart(p),
+      selectMove: (p) => this.selectMove(p),
+      selectEnd: () => this.selectEnd(),
     };
+  }
+
+  private onTap(x: number, y: number): boolean {
+    if (this.selection) {
+      this.clearSelection();
+      return true;
+    }
+    this.setFlash(null);
+    const s = this.sections.get(this.cur.section);
+    const id = s?.markAt(x, y);
+    if (s && id) {
+      const h = this.highlights.find((x) => x.id === id);
+      const rect = h && s.viewRect(h.start, h.end);
+      if (rect) {
+        this.cb.onHighlightTap?.(id, rect);
+        return true;
+      }
+    }
+    return this.followLink(x, y);
   }
 
   private followLink(x: number, y: number): boolean {
@@ -407,7 +646,10 @@ export class Reader {
     if (!s) return;
     const n = this.book.spine.length;
     const frac = s.pageCount > 1 ? this.cur.page / s.pageCount : 0;
-    const progress = Math.min(1, (this.cur.section + frac) / n);
+    const i = this.cur.section;
+    const lastShown = Math.min(s.pageCount, this.cur.page + this.ppv);
+    const read = s.pageCount > 0 ? lastShown / s.pageCount : 1;
+    const progress = Math.min(1, this.sectionStart[i] + read * (this.sectionStart[i + 1] - this.sectionStart[i]));
     this.cb.onLocation(
       { section: this.cur.section, anchor: s.anchorAt(this.cur.page), fraction: frac, progress },
       {
@@ -424,6 +666,7 @@ export class Reader {
 
   private onWheel = (e: WheelEvent) => {
     e.preventDefault();
+    if (this.selection) return;
     if (this.turner.busy || performance.now() < this.wheelLock) return;
     this.wheelAccum += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     if (Math.abs(this.wheelAccum) > 40) {
@@ -446,4 +689,31 @@ export class Reader {
     this.el.remove();
     this.renderer.gl.getExtension('WEBGL_lose_context')?.loseContext();
   }
+}
+
+/** Lowercase without diacritics, keeping string length (search offsets map 1:1). */
+function fold(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const f = ch.normalize('NFD')[0].toLowerCase();
+    out += f.length === ch.length ? f : ch;
+  }
+  return out;
+}
+
+const WORD = /[\p{L}\p{N}\p{M}'’\-]/u;
+
+/** Range of the word around a text position (or the single character if not in a word). */
+function wordRange(node: Text, offset: number): Range {
+  const t = node.data;
+  let a = Math.min(offset, t.length);
+  if (a > 0 && !WORD.test(t[a] ?? '') && WORD.test(t[a - 1])) a--;
+  let b = a;
+  while (a > 0 && WORD.test(t[a - 1])) a--;
+  while (b < t.length && WORD.test(t[b])) b++;
+  if (a === b) b = Math.min(t.length, a + 1);
+  const r = node.ownerDocument.createRange();
+  r.setStart(node, a);
+  r.setEnd(node, b);
+  return r;
 }

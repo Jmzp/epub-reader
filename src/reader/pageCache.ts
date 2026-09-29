@@ -56,7 +56,7 @@ export class PageTextures {
     if (!p) {
       const gen = this.generation;
       p = this.queue = this.queue
-        .then(() => (gen === this.generation ? this.rasterize(section, first, count, scale) : undefined))
+        .then(() => (gen === this.generation ? this.rasterize(section, first, count, scale, gen) : undefined))
         .catch((err) => console.error('[pages] rasterize failed', err))
         .finally(() => this.inflight.delete(wkey));
       this.inflight.set(wkey, p);
@@ -64,7 +64,7 @@ export class PageTextures {
     await p;
   }
 
-  private async rasterize(section: Section, first: number, count: number, scale: number) {
+  private async rasterize(section: Section, first: number, count: number, scale: number, gen: number) {
     const layout = section.layoutInfo!;
     const last = Math.min(section.pageCount, first + count);
     if (first >= last) return;
@@ -83,6 +83,8 @@ export class PageTextures {
     }
     const g = c.getContext('2d')!;
     for (let page = first; page < last; page++) {
+      // Stale work (layout, theme or marks changed meanwhile) must not repopulate the cache.
+      if (gen !== this.generation) return;
       const k = this.key(section.index, page);
       if (this.cache.has(k)) continue;
       g.fillStyle = this.paper();
@@ -129,6 +131,18 @@ export class PageTextures {
     for (const [k, e] of entries.slice(0, Math.max(0, this.cache.size - MAX_TEXTURES))) {
       this.renderer.deleteTexture(e.tex);
       this.cache.delete(k);
+    }
+  }
+
+  /** The section's content changed (highlights): its textures are stale. */
+  dropSection(index: number) {
+    this.generation++;
+    this.inflight.clear();
+    for (const [k, e] of this.cache) {
+      if (!k.startsWith(`${index}:`)) continue;
+      this.renderer.deleteTexture(e.tex);
+      this.cache.delete(k);
+      this.pinned.delete(k);
     }
   }
 
