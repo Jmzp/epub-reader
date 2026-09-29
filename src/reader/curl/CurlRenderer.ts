@@ -62,13 +62,16 @@ export class CurlRenderer {
     if (!gl) throw new Error('WebGL2 is not available');
     this.gl = gl;
 
-    const flatProg = program(gl, FLAT_VS, FLAT_FS);
+    // `?debug=faces` tints each layer: flat pages green, sheet front red, sheet back blue.
+    const faces = new URLSearchParams(location.search).get('debug') === 'faces';
+    const tint = (fs: string, expr: string) => (faces ? fs.replace(/outColor = vec4\((.*), 1\.0\);\n\}$/, `outColor = vec4(($1) * ${expr}, 1.0);\n}`) : fs);
+    const flatProg = program(gl, FLAT_VS, tint(FLAT_FS, 'vec3(0.7, 1.0, 0.7)'));
     const flatVao = gl.createVertexArray()!;
     gl.bindVertexArray(flatVao);
     buffer(gl, flatProg, 'aPos', new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]));
     this.flat = { prog: flatProg, u: uniforms(gl, flatProg), vao: flatVao };
 
-    const sheetProg = program(gl, SHEET_VS, SHEET_FS);
+    const sheetProg = program(gl, SHEET_VS, tint(SHEET_FS, '(front ? vec3(1.0, 0.6, 0.6) : vec3(0.6, 0.6, 1.0))'));
     const sheetVao = gl.createVertexArray()!;
     gl.bindVertexArray(sheetVao);
     const uv = new Float32Array((GRID_X + 1) * (GRID_Y + 1) * 2);
@@ -180,7 +183,6 @@ export class CurlRenderer {
       gl.bindVertexArray(this.sheet.vao);
       const u = this.sheet.u;
       setCommon(u);
-      gl.uniform1f(u.uFocal, Math.max(this.cssW, this.cssH) * 3);
       gl.uniform3f(u.uPaper, ...this.paper);
       gl.uniform1f(u.uShowThrough, this.showThrough);
       gl.uniform1i(u.uMirrorBack, s.back ? 0 : 1);

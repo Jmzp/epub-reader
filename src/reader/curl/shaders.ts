@@ -78,7 +78,6 @@ void main() {
 
 export const SHEET_VS = /* glsl */ `#version 300 es
 ${COMMON}
-uniform float uFocal;
 in vec2 aUV;
 out vec2 vUV;
 out vec3 vNormal;
@@ -110,10 +109,10 @@ void main() {
   vD = d;
   vLocal = p;
 
+  // Orthographic on purpose: the shadows cast by the lifted paper are computed in flat
+  // sheet space, so any perspective here makes the paper and its shadow drift apart and
+  // leaves an unshadowed sliver along the flipped edge.
   vec2 screen = uSheetOrigin + pos.xy;
-  // Mild perspective around the view center: lifted paper looks a touch closer.
-  vec2 c = uView * 0.5;
-  screen = c + (screen - c) * (uFocal / (uFocal - pos.z));
   gl_Position = vec4(screen.x / uView.x * 2.0 - 1.0, 1.0 - screen.y / uView.y * 2.0, 0.5 - pos.z / 8000.0, 1.0);
 }`;
 

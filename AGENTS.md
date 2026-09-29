@@ -54,6 +54,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 - **Clamp pages with the target section.** Use `alignIn(section, page)`, not `align(page)`, when the destination is a different section (`align` uses the current one).
 - **Neighbour sections load asynchronously.** Cross-chapter turns must `await ensureSection()` first (see `Reader.turn`), or the first key press after opening is lost.
 - **Textures in use must not be evicted.** Long animations (the riffle) `pin()` their pages and call `unpinAll()` when done.
+- **The sheet is rendered orthographically.** The shadows the lifted paper casts are computed in flat sheet space (`flippedEdgeShadow`, curl shadow). Adding perspective to the sheet makes paper and shadow drift apart and leaves a bright, unshadowed sliver along the flipped edge.
 - **Positions are anchors, not page numbers.** Save and restore with `Section.anchorAt()` / `pageOfAnchor()` so font, size and rotation changes keep the reader on the same passage.
 - **ARM64 performance:** WebGL runs without MSAA at dpr ≥ 1.75, with `desynchronized: true` and `high-performance`. There are no per-frame allocations in the render loop, and the mesh is never rebuilt.
 
@@ -61,6 +62,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 
 - Typecheck and tests must pass: `npx tsc --noEmit -p . && npm test`.
 - Curl or visual changes: use `/curl-lab.html?debug` and `pose(x, y)` to freeze and screenshot a pose.
+- Layer debugging: `?debug=faces` tints flat pages green, the sheet's front red and its back blue, which shows at a glance which surface produces an artifact.
 - Rendering changes: check both **WebKit and Chromium at deviceScaleFactor 2** (Playwright works well). Compare a screenshot at rest with one mid-drag; they must match outside the curl.
 - Synthetic pointer events work for driving turns: dispatch `PointerEvent`s on `.reader-input` (`pointerId` of your choice; pointer capture failures are tolerated).
 - Background browser tabs pause `requestAnimationFrame`, so animations appear frozen. That is not a bug.
