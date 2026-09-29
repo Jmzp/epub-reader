@@ -8,6 +8,7 @@ import {
   type HighlightColor,
 } from './annotations';
 import { define, lookupTerm } from './dictionary';
+import { setLanguage, t } from './i18n';
 import { parseEpub, type Book, type TocEntry } from './epub/book';
 import { openedFile, openExternal, toggleFullscreen } from './platform';
 import { Reader, type ReaderPosition, type SearchHit, type SelectionInfo } from './reader/Reader';
@@ -16,6 +17,7 @@ import { bookBytes, coverBlob, fonts as fontStore, library, prefs, type LibraryB
 
 const app = document.getElementById('app')!;
 let settings = prefs.settings();
+setLanguage(settings.language);
 let reader: Reader | null = null;
 let cleanupReader: (() => void) | null = null;
 
@@ -52,15 +54,15 @@ async function showLibrary(error?: string) {
   applyUiTheme();
   app.replaceChildren();
   const input = el('input', { type: 'file', accept: '.epub,application/epub+zip', multiple: true, hidden: true });
-  const openBtn = el('button', { className: 'btn primary', textContent: 'Abrir EPUB' });
+  const openBtn = el('button', { className: 'btn primary', textContent: t('openEpub') });
   openBtn.onclick = () => input.click();
   input.onchange = () => input.files && importFiles([...input.files]);
-  const root = el('div', { className: 'library' }, el('header', {}, el('h1', { textContent: 'Biblioteca' }), openBtn, input));
+  const root = el('div', { className: 'library' }, el('header', {}, el('h1', { textContent: t('library') }), openBtn, input));
   if (error) root.append(el('p', { className: 'error', textContent: error }));
 
   const books = await library.list().catch(() => [] as LibraryBook[]);
   if (!books.length) {
-    root.append(el('div', { className: 'drop' }, 'Arrastra un archivo .epub aquí o pulsa «Abrir EPUB».'));
+    root.append(el('div', { className: 'drop' }, t('dropHint')));
   } else {
     const grid = el('div', { className: 'grid' });
     for (const b of books) grid.append(bookCard(b));
@@ -91,7 +93,7 @@ function bookCard(b: LibraryBook): HTMLElement {
     cover.style.padding = '16px';
     cover.textContent = b.title;
   }
-  const remove = el('button', { className: 'remove', title: 'Quitar de la biblioteca', textContent: '×' });
+  const remove = el('button', { className: 'remove', title: t('removeFromLibrary'), textContent: '×' });
   remove.onclick = async (e) => {
     e.stopPropagation();
     await library.remove(b.id);
@@ -119,7 +121,7 @@ async function importFiles(files: File[]) {
     for (const f of files) last = await importBytes(new Uint8Array(await f.arrayBuffer()));
   } catch (err) {
     console.error(err);
-    return showLibrary(`No se pudo abrir el archivo: ${(err as Error).message}`);
+    return showLibrary(t('openError', { error: (err as Error).message }));
   }
   if (last) await openFromLibrary(last);
 }
@@ -162,7 +164,7 @@ function openReader(book: Book, entry: LibraryBook) {
   shell.style.cssText = 'position:absolute;inset:0';
   app.append(shell);
 
-  const loading = el('div', { className: 'loading', textContent: 'Abriendo…' });
+  const loading = el('div', { className: 'loading', textContent: t('opening') });
   shell.append(loading);
 
   // Top bar
@@ -172,13 +174,13 @@ function openReader(book: Book, entry: LibraryBook) {
     b.innerHTML = svg;
     return b;
   };
-  const backBtn = iconBtn(ICONS.back, 'Biblioteca');
-  const tocBtn = iconBtn(ICONS.toc, 'Índice');
-  const searchBtn = iconBtn(ICONS.search, 'Buscar en el libro (Ctrl+F)');
-  const notesBtn = iconBtn(ICONS.notes, 'Notas y marcadores');
-  const markBtn = iconBtn(ICONS.bookmark, 'Marcar esta página');
-  const setBtn = iconBtn(ICONS.type, 'Ajustes de lectura');
-  const fullBtn = iconBtn(ICONS.full, 'Pantalla completa (F11)');
+  const backBtn = iconBtn(ICONS.back, t('library'));
+  const tocBtn = iconBtn(ICONS.toc, t('contents'));
+  const searchBtn = iconBtn(ICONS.search, t('searchBook'));
+  const notesBtn = iconBtn(ICONS.notes, t('notesAndBookmarks'));
+  const markBtn = iconBtn(ICONS.bookmark, t('bookmarkPage'));
+  const setBtn = iconBtn(ICONS.type, t('readingSettings'));
+  const fullBtn = iconBtn(ICONS.full, t('fullscreen'));
   const top = el(
     'div',
     { className: 'chrome top' },
@@ -295,7 +297,7 @@ function openReader(book: Book, entry: LibraryBook) {
       document.execCommand('copy');
       ta.remove();
     }
-    flashToast('Copiado');
+    flashToast(t('copied'));
   };
 
   const hideSelMenu = () => {
@@ -310,7 +312,7 @@ function openReader(book: Book, entry: LibraryBook) {
     const run = ++lookupRun;
     selMenu.hidden = true;
     const term = lookupTerm(sel.text);
-    const body = el('div', { className: 'dict-body' }, el('p', { className: 'meta', textContent: 'Buscando…' }));
+    const body = el('div', { className: 'dict-body' }, el('p', { className: 'meta', textContent: t('looking') }));
     const more = el('button', { className: 'menu-btn', textContent: 'Wiktionary ↗' });
     more.onclick = () => void openExternal(`https://en.wiktionary.org/wiki/${encodeURIComponent(term)}`);
     dict.replaceChildren(el('h3', { textContent: term }), body, el('div', { className: 'dict-foot' }, more));
@@ -320,7 +322,7 @@ function openReader(book: Book, entry: LibraryBook) {
       const found = await define(term, book.metadata.language);
       if (run !== lookupRun) return;
       if (!found) {
-        body.replaceChildren(el('p', { className: 'meta', textContent: 'No hay definición para esta palabra.' }));
+        body.replaceChildren(el('p', { className: 'meta', textContent: t('noDefinition') }));
       } else {
         body.replaceChildren(
           ...found.entries.map((e) =>
@@ -334,7 +336,7 @@ function openReader(book: Book, entry: LibraryBook) {
         );
       }
     } catch {
-      if (run === lookupRun) body.replaceChildren(el('p', { className: 'meta', textContent: 'Sin conexión: el diccionario necesita internet.' }));
+      if (run === lookupRun) body.replaceChildren(el('p', { className: 'meta', textContent: t('offline') }));
     }
     if (run === lookupRun) placeCard(dict, sel.rect);
   };
@@ -356,7 +358,7 @@ function openReader(book: Book, entry: LibraryBook) {
 
   const swatches = (current: HighlightColor | null, pick: (c: HighlightColor) => void) =>
     (Object.keys(SWATCHES) as HighlightColor[]).map((c) => {
-      const b = el('button', { className: `swatch-btn${c === current ? ' on' : ''}`, title: 'Resaltar', ariaLabel: `Resaltar ${c}` });
+      const b = el('button', { className: `swatch-btn${c === current ? ' on' : ''}`, title: t('highlight'), ariaLabel: `${t('highlight')} ${c}` });
       b.style.setProperty('--c', SWATCHES[c]);
       b.onclick = () => pick(c);
       return b;
@@ -384,13 +386,13 @@ function openReader(book: Book, entry: LibraryBook) {
     selMenu.replaceChildren(
       ...swatches(null, (c) => make(c)),
       el('span', { className: 'sep' }),
-      menuBtn('Nota', () => editNote(make('yellow'))),
-      menuBtn('Copiar', () => {
+      menuBtn(t('note'), () => editNote(make('yellow'))),
+      menuBtn(t('copy'), () => {
         void copy(sel.text);
         reader?.clearSelection();
       }),
-      ...(sel.text.trim().split(/\s+/).length <= 3 ? [menuBtn('Definir', () => void showDefinition(sel))] : []),
-      menuBtn('Buscar', () => {
+      ...(sel.text.trim().split(/\s+/).length <= 3 ? [menuBtn(t('define'), () => void showDefinition(sel))] : []),
+      menuBtn(t('search'), () => {
         reader?.clearSelection();
         openSearch(sel.text);
       }),
@@ -406,12 +408,12 @@ function openReader(book: Book, entry: LibraryBook) {
         hideSelMenu();
       }),
       el('span', { className: 'sep' }),
-      menuBtn(h.note ? 'Editar nota' : 'Nota', () => editNote(h)),
-      menuBtn('Copiar', () => {
+      menuBtn(h.note ? t('editNote') : t('note'), () => editNote(h)),
+      menuBtn(t('copy'), () => {
         void copy(h.text);
         hideSelMenu();
       }),
-      menuBtn('Borrar', () => {
+      menuBtn(t('delete'), () => {
         ann.highlights = ann.highlights.filter((x) => x !== h);
         persist();
         hideSelMenu();
@@ -422,7 +424,7 @@ function openReader(book: Book, entry: LibraryBook) {
 
   const editNote = (h: Highlight) => {
     hideSelMenu();
-    const area = el('textarea', { value: h.note ?? '', placeholder: 'Escribe una nota…', rows: 5 });
+    const area = el('textarea', { value: h.note ?? '', placeholder: t('writeNote'), rows: 5 });
     const close = () => (noteEditor.hidden = true);
     const save = () => {
       h.note = area.value.trim() || undefined;
@@ -437,7 +439,7 @@ function openReader(book: Book, entry: LibraryBook) {
     noteEditor.replaceChildren(
       el('blockquote', { textContent: h.text.length > 220 ? h.text.slice(0, 220) + '…' : h.text }),
       area,
-      el('div', { className: 'row' }, el('button', { className: 'btn', textContent: 'Cancelar', onclick: close }), el('button', { className: 'btn primary', textContent: 'Guardar', onclick: save })),
+      el('div', { className: 'row' }, el('button', { className: 'btn', textContent: t('cancel'), onclick: close }), el('button', { className: 'btn primary', textContent: t('save'), onclick: save })),
     );
     noteEditor.hidden = false;
     area.focus();
@@ -450,7 +452,7 @@ function openReader(book: Book, entry: LibraryBook) {
     const on = !!bookmarkHere();
     reader?.setRibbon(on);
     markBtn.classList.toggle('on', on);
-    markBtn.title = on ? 'Quitar marcador' : 'Marcar esta página';
+    markBtn.title = on ? t('removeBookmark') : t('bookmarkPage');
   };
   const toggleBookmark = () => {
     const existing = bookmarkHere();
@@ -478,7 +480,7 @@ function openReader(book: Book, entry: LibraryBook) {
       });
     const list = el('div', { className: 'list' });
     const item = (onGo: () => void, onDelete: () => void, ...kids: (Node | string)[]) => {
-      const del = el('button', { className: 'del', title: 'Borrar', textContent: '×' });
+      const del = el('button', { className: 'del', title: t('delete'), textContent: '×' });
       del.onclick = (e) => {
         e.stopPropagation();
         onDelete();
@@ -507,7 +509,7 @@ function openReader(book: Book, entry: LibraryBook) {
           ),
         );
       }
-      if (!ann.highlights.length) list.append(el('p', { className: 'empty', textContent: 'Mantén presionado el texto para subrayar o añadir una nota.' }));
+      if (!ann.highlights.length) list.append(el('p', { className: 'empty', textContent: t('noNotes') }));
     } else {
       for (const b of [...ann.bookmarks].sort(byPosition((x) => x.anchor))) {
         list.append(
@@ -522,16 +524,16 @@ function openReader(book: Book, entry: LibraryBook) {
           ),
         );
       }
-      if (!ann.bookmarks.length) list.append(el('p', { className: 'empty', textContent: 'Pulsa el marcador de la barra superior para guardar una página.' }));
+      if (!ann.bookmarks.length) list.append(el('p', { className: 'empty', textContent: t('noBookmarks') }));
     }
     const exportBtn = el('button', {
       className: 'btn',
-      textContent: 'Copiar notas (Markdown)',
+      textContent: t('copyNotes'),
       disabled: !ann.highlights.length,
       onclick: () => void copy(toMarkdown(book.metadata.title, book.metadata.creator, ann)),
     });
     notesPanel.replaceChildren(
-      el('div', { className: 'tabs' }, tab('highlights', 'Notas', ann.highlights.length), tab('bookmarks', 'Marcadores', ann.bookmarks.length)),
+      el('div', { className: 'tabs' }, tab('highlights', t('notesTab'), ann.highlights.length), tab('bookmarks', t('bookmarksTab'), ann.bookmarks.length)),
       list,
       el('div', { className: 'foot' }, exportBtn),
     );
@@ -539,7 +541,7 @@ function openReader(book: Book, entry: LibraryBook) {
 
   /* ---- Search */
 
-  const searchInput = el('input', { type: 'search', placeholder: 'Buscar en el libro…' });
+  const searchInput = el('input', { type: 'search', placeholder: t('searchPlaceholder') });
   const searchInfo = el('div', { className: 'meta' });
   const results = el('div', { className: 'list' });
   searchPanel.append(el('div', { className: 'search-row' }, searchInput), searchInfo, results);
@@ -552,10 +554,10 @@ function openReader(book: Book, entry: LibraryBook) {
       searchInfo.textContent = '';
       return;
     }
-    searchInfo.textContent = 'Buscando…';
+    searchInfo.textContent = t('searching');
     const hits: SearchHit[] = (await reader?.search(q, () => run !== searchRun)) ?? [];
     if (run !== searchRun) return;
-    searchInfo.textContent = hits.length ? `${hits.length}${hits.length >= 300 ? '+' : ''} resultados` : 'Sin resultados';
+    searchInfo.textContent = hits.length ? t('results', { n: `${hits.length}${hits.length >= 300 ? '+' : ''}` }) : t('noResults');
     for (const hit of hits) {
       const [before, match, after] = hit.context;
       const row = el('div', { className: 'item', tabIndex: 0 }, el('div', { className: 'snippet' }, before, el('mark', { textContent: match }), after));
@@ -630,13 +632,21 @@ function openReader(book: Book, entry: LibraryBook) {
     };
     toc.append(a);
   }
-  if (!flatToc.length) toc.append(el('div', { textContent: 'Este libro no tiene índice.' }));
+  if (!flatToc.length) toc.append(el('div', { textContent: t('noContents') }));
 
   buildSettings(settingsPanel, (s) => {
-    // The status bar is an overlay: toggling it must not re-paginate the book.
-    const layoutChanged = JSON.stringify({ ...s, statusBar: 0 }) !== JSON.stringify({ ...settings, statusBar: 0 });
+    // The status bar and the UI language don't affect pagination.
+    const layoutChanged = JSON.stringify({ ...s, statusBar: 0, language: 0 }) !== JSON.stringify({ ...settings, statusBar: 0, language: 0 });
+    const languageChanged = s.language !== settings.language;
     settings = s;
     prefs.saveSettings(s);
+    if (languageChanged) {
+      // Rebuild every label; the book reopens at the same position.
+      setLanguage(s.language);
+      cleanupReader?.();
+      void openFromLibrary(entry.id);
+      return;
+    }
     applyUiTheme();
     updateStatus();
     if (layoutChanged) reader?.setSettings(s);
@@ -737,7 +747,7 @@ function buildSettings(panel: HTMLElement, onChange: (s: ReaderSettings) => void
       const b = el('button', { className: `font-chip${settings.fontFamily === choice ? ' on' : ''}`, textContent: f.name, title: f.name });
       b.style.fontFamily = `"__user_font_${f.id}", serif`;
       b.onclick = () => change({ ...settings, fontFamily: choice });
-      const del = el('button', { className: 'font-del', title: `Quitar ${f.name}`, textContent: '×' });
+      const del = el('button', { className: 'font-del', title: t('remove', { name: f.name }), textContent: '×' });
       del.onclick = async () => {
         await fontStore.remove(f.id);
         userFonts = userFonts.filter((x) => x !== f);
@@ -753,8 +763,8 @@ function buildSettings(panel: HTMLElement, onChange: (s: ReaderSettings) => void
       const f = await importFont(file);
       change({ ...settings, fontFamily: `user:${f.id}` });
     };
-    list.append(el('button', { className: 'font-chip add', textContent: '+ Importar fuente', onclick: () => input.click() }), input);
-    return el('div', {}, el('label', { textContent: 'Mis fuentes' }), list);
+    list.append(el('button', { className: 'font-chip add', textContent: t('importFont'), onclick: () => input.click() }), input);
+    return el('div', {}, el('label', { textContent: t('myFonts') }), list);
   };
 
   const render = () => {
@@ -766,49 +776,53 @@ function buildSettings(panel: HTMLElement, onChange: (s: ReaderSettings) => void
       el('button', { textContent: 'A+', onclick: () => size(1) }),
     );
     panel.replaceChildren(
-      el('div', {}, el('label', { textContent: 'Tamaño' }), sizeRow),
-      seg('Tipografía', 'fontFamily', [
+      el('div', {}, el('label', { textContent: t('size') }), sizeRow),
+      seg(t('typeface'), 'fontFamily', [
         ['serif', 'Serif'],
         ['sans', 'Sans'],
-        ['book', 'Libro'],
+        ['book', t('bookFont')],
       ]),
       fontList(),
-      seg('Alineación', 'align', [
-        ['book', 'Original'],
-        ['justify', 'Justificada'],
-        ['left', 'Izquierda'],
+      seg(t('alignment'), 'align', [
+        ['book', t('original')],
+        ['justify', t('justified')],
+        ['left', t('left')],
       ]),
-      seg('Guiones', 'hyphenate', [
-        [true, 'Sí'],
-        [false, 'No'],
+      seg(t('hyphenation'), 'hyphenate', [
+        [true, t('on')],
+        [false, t('off')],
       ]),
-      seg('Párrafos', 'paragraphs', [
-        ['book', 'Original'],
-        ['indent', 'Sangría'],
-        ['spaced', 'Separados'],
+      seg(t('paragraphs'), 'paragraphs', [
+        ['book', t('original')],
+        ['indent', t('indented')],
+        ['spaced', t('spaced')],
       ]),
-      seg('Interlineado', 'lineHeight', [
-        [1.3, 'Compacto'],
-        [1.5, 'Normal'],
-        [1.75, 'Amplio'],
+      seg(t('lineSpacing'), 'lineHeight', [
+        [1.3, t('compact')],
+        [1.5, t('normal')],
+        [1.75, t('wide')],
       ]),
-      seg('Márgenes', 'margin', [
-        [0.6, 'Estrechos'],
-        [1, 'Normales'],
-        [1.6, 'Anchos'],
+      seg(t('margins'), 'margin', [
+        [0.6, t('narrow')],
+        [1, t('normalMargins')],
+        [1.6, t('wideMargins')],
       ]),
-      seg('Tema', 'theme', [
-        ['paper', 'Papel'],
-        ['sepia', 'Sepia'],
-        ['night', 'Noche'],
+      seg(t('theme'), 'theme', [
+        ['paper', t('paper')],
+        ['sepia', t('sepia')],
+        ['night', t('night')],
       ]),
-      seg('Páginas', 'spread', [
-        ['auto', 'Libro abierto'],
-        ['single', 'Una página'],
+      seg(t('pages'), 'spread', [
+        ['auto', t('openBook')],
+        ['single', t('singlePage')],
       ]),
-      seg('Barra de estado', 'statusBar', [
-        [true, 'Visible'],
-        [false, 'Oculta'],
+      seg(t('statusBar'), 'statusBar', [
+        [true, t('shown')],
+        [false, t('hidden')],
+      ]),
+      seg(t('language'), 'language', [
+        ['en', 'English'],
+        ['es', 'Español'],
       ]),
     );
   };

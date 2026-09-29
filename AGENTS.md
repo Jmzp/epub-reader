@@ -41,6 +41,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 | `src/reader/Reader.ts` | Orchestrator: sections, current view, `TurnSource`, prefetch, TOC riffle, persistence callbacks. |
 | `src/main.ts`, `src/ui/styles.css` | Library, toolbars, TOC, settings. |
 | `src/storage.ts` | IndexedDB library + localStorage settings/positions. |
+| `src/i18n.ts` | UI strings (`en` default, `es`) and `t(key, vars)`. The language is a reader setting. |
 | `src/dictionary.ts` | Wiktionary REST lookups (CORS-enabled, no key); links open through `tauri-plugin-opener`. |
 | `src/annotations.ts` | Highlights, notes, bookmarks (localStorage `notes:<bookId>`), Markdown export. |
 | `src-tauri/` | Minimal Rust shell: window, `.epub` file-association commands, NSIS bundle. |
@@ -77,7 +78,7 @@ CI: `.github/workflows/windows-arm64.yml` builds on the native `windows-11-arm` 
 
 ## Conventions
 
-- **Language:** code, comments, docs and commit messages in English. The app UI strings (`src/main.ts`) are intentionally in Spanish.
+- **Language:** code, comments, docs and commit messages in English. UI text goes through `t()` in `src/i18n.ts`, with English (default) and Spanish. Never hard-code user-visible strings; add a key to both dictionaries.
 - **Attribution:** do not add AI co-author trailers (`Co-Authored-By: ...`) or "generated with" lines to commits or PRs. The repository owner is the sole contributor.
 - **Style:** match the surrounding code. TypeScript strict mode, no framework in the reader core, small focused modules, comments explaining *why* rather than *what*.
 - **Copyrighted content:** never commit third-party EPUBs, covers or book text. Tests build EPUBs in memory (`tests/makeEpub.ts`).

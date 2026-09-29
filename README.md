@@ -28,7 +28,7 @@ A desktop EPUB reader with **realistic page turning**: grab the page with a fing
 - **Full input support:** touch, pen, mouse, wheel and keyboard (`←` `→` `PgUp` `PgDn` `Space` `F11`, `Ctrl+F` to search).
 - **EPUB 2 and EPUB 3:** OPF, spine, NCX or nav document, cover, and the book's own CSS and images.
 
-The app UI is currently in Spanish.
+The interface is in English by default, with Spanish available under **Reading settings → Language**.
 
 ## Trying it on a Surface
 
@@ -36,7 +36,7 @@ The installer and the portable build come from the ARM64 build (see below):
 
 | File | Use |
 | --- | --- |
-| `Lector EPUB_1.0.0_arm64-setup.exe` | Per-user installer, no admin needed. Associates `.epub` files and installs WebView2 if missing. |
+| `EPUB Reader_<version>_arm64-setup.exe` | Per-user installer, no admin needed. Associates `.epub` files and installs WebView2 if missing. |
 | `epub-reader.exe` | Portable. Requires WebView2, which ships with Windows 11. |
 
 > The app is not code-signed, so SmartScreen will warn about it. Click **More info → Run anyway**.
@@ -100,6 +100,7 @@ EPUB (zip) ──► parser (fflate + DOMParser) ──► one iframe per chapte
 | `src/main.ts`, `src/ui/` | Library, toolbars, table of contents and settings |
 | `src/storage.ts` | Library (IndexedDB), reading position and settings (localStorage) |
 | `src/annotations.ts` | Highlights, notes and bookmarks: types, storage and Markdown export |
+| `src/i18n.ts` | UI strings (English and Spanish) and the `t()` helper |
 | `src/dictionary.ts` | Wiktionary lookups for the *Definir* action |
 | `src-tauri/` | Native shell: window, `.epub` file association and NSIS bundle |
 

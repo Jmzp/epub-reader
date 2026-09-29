@@ -1,3 +1,5 @@
+import type { Language } from '../i18n';
+
 export type ThemeName = 'paper' | 'sepia' | 'night';
 /** Built-in faces, or `user:<id>` for a font the reader imported. */
 export type FontChoice = 'book' | 'serif' | 'sans' | `user:${string}`;
@@ -16,6 +18,7 @@ export interface ReaderSettings {
   spread: 'auto' | 'single';
   /** Clock, battery, chapter page and book percentage along the bottom edge. */
   statusBar: boolean;
+  language: Language;
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
@@ -29,6 +32,7 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   theme: 'paper',
   spread: 'auto',
   statusBar: true,
+  language: 'en',
 };
 
 export interface Theme {
